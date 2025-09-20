@@ -7,6 +7,7 @@
 import asyncio
 import argparse
 import uuid
+import os
 from dotenv import load_dotenv
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
@@ -23,14 +24,69 @@ from langchain_core.messages import HumanMessage
 # 加载环境变量
 load_dotenv(".env")
 
-async def run_interactive_research(question: str, model: str = "deepseek:deepseek-reasoner", search_api: str = "tavily"):
+def select_research_files():
+    """让用户选择要研究的文件路径"""
+    print("\n" + "="*50)
+    print("请选择要研究的文件:")
+    print("="*50)
+
+    # 提供一些常见选项
+    options = [
+        ("./test_docs", "测试文档目录 (包含AI历史和时间线)"),
+        ("./", "当前项目根目录"),
+        ("./src", "源代码目录"),
+        ("custom", "自定义路径")
+    ]
+
+    for i, (path, desc) in enumerate(options, 1):
+        print(f"{i}. {desc} ({path})")
+
+    while True:
+        try:
+            choice = input("\n请选择 (1-4): ").strip()
+
+            if choice == "1":
+                return os.path.abspath("./test_docs")
+            elif choice == "2":
+                return os.path.abspath("./")
+            elif choice == "3":
+                return os.path.abspath("./src")
+            elif choice == "4":
+                custom_path = input("请输入自定义路径: ").strip()
+                if os.path.exists(custom_path):
+                    return os.path.abspath(custom_path)
+                else:
+                    print(f"路径不存在: {custom_path}")
+                    continue
+            else:
+                print("无效选择，请重新输入")
+                continue
+
+        except KeyboardInterrupt:
+            print("\n\n用户取消，使用默认测试目录")
+            return os.path.abspath("./test_docs")
+
+        break
+
+    return os.path.abspath("./test_docs")
+
+async def run_interactive_research(question: str, model: str = "deepseek:deepseek-reasoner", search_api: str = "tavily", docs_path: str = None):
     """运行交互式深度研究"""
+
+    # 如果直接提供了docs_path，跳过交互式澄清，直接研究
+    if docs_path:
+        if os.path.exists(docs_path):
+            print(f"使用指定的文档路径: {docs_path}")
+            return await run_direct_research(question, model, search_api, os.path.abspath(docs_path))
+        else:
+            print(f"指定的路径不存在: {docs_path}")
+            print("将进入交互式选择模式...")
 
     # 编译研究图
     from open_deep_research.deep_researcher import deep_researcher_builder
     graph = deep_researcher_builder.compile(checkpointer=MemorySaver())
 
-    # 配置参数
+    # 配置参数（暂时不包含MCP，等用户选择文件后再配置）
     config = {
         "configurable": {
             "thread_id": str(uuid.uuid4()),
@@ -98,16 +154,21 @@ async def run_interactive_research(question: str, model: str = "deepseek:deepsee
                                     enhanced_question = f"{question}\n\n补充信息: {user_clarification}"
                                     print(f"\n更新后的研究问题: {enhanced_question}")
                                     print("=" * 50)
-                                    return await run_direct_research(enhanced_question, model, search_api)
+                                    # 选择文件后开始研究
+                                    selected_docs_path = select_research_files()
+                                    return await run_direct_research(enhanced_question, model, search_api, selected_docs_path)
                                 else:
                                     # 用户选择直接继续，使用原问题
                                     print("\n跳过澄清，继续使用原问题进行研究...")
                                     print("=" * 50)
-                                    return await run_direct_research(question, model, search_api)
+                                    # 选择文件后开始研究
+                                    selected_docs_path = select_research_files()
+                                    return await run_direct_research(question, model, search_api, selected_docs_path)
                             else:
                                 # 不需要澄清，继续研究
                                 print("无需澄清，继续研究...")
-                                return await run_direct_research(question, model, search_api)
+                                selected_docs_path = select_research_files()
+                                return await run_direct_research(question, model, search_api, selected_docs_path)
 
             first_result = event
             # 只执行第一步澄清检查
@@ -115,7 +176,8 @@ async def run_interactive_research(question: str, model: str = "deepseek:deepsee
 
         # 如果澄清步骤没有返回澄清问题，直接进行研究
         print("无需澄清，直接开始研究...")
-        return await run_direct_research(question, model, search_api)
+        selected_docs_path = select_research_files()
+        return await run_direct_research(question, model, search_api, selected_docs_path)
 
     except Exception as e:
         print(f"研究过程中出现错误: {e}")
@@ -123,7 +185,7 @@ async def run_interactive_research(question: str, model: str = "deepseek:deepsee
         traceback.print_exc()
         return None
 
-async def run_direct_research(question: str, model: str, search_api: str):
+async def run_direct_research(question: str, model: str, search_api: str, docs_path: str = None):
     """执行直接研究（跳过澄清）"""
 
     # 创建简化的研究图
@@ -167,6 +229,16 @@ async def run_direct_research(question: str, model: str, search_api: str):
             "final_report_model_max_tokens": 8192,
         }
     }
+
+    # 如果提供了文档路径，添加MCP配置
+    if docs_path:
+        print(f"使用文档路径: {docs_path}")
+        config["configurable"]["mcp_config"] = {
+            "url": f"stdio://npx @modelcontextprotocol/server-filesystem {docs_path}",
+            "tools": ["read_file", "list_files"],
+            "auth_required": False
+        }
+        config["configurable"]["mcp_prompt"] = f"你可以使用read_file工具读取{docs_path}目录下的文件，list_files工具查看目录内容。优先使用本地文件中的信息进行研究。"
 
     print(f"\n开始执行研究流程...")
     print("=" * 50)
@@ -227,11 +299,12 @@ def main():
     parser.add_argument("question", help="研究问题或主题")
     parser.add_argument("--model", default="deepseek:deepseek-reasoner", help="使用的模型")
     parser.add_argument("--search", default="none", help="搜索API (tavily需要API密钥)")
+    parser.add_argument("--docs-path", help="指定要研究的文档路径（跳过交互式选择）")
 
     args = parser.parse_args()
 
     # 运行交互式研究
-    result = asyncio.run(run_interactive_research(args.question, args.model, args.search))
+    result = asyncio.run(run_interactive_research(args.question, args.model, args.search, args.docs_path))
 
     if result:
         print("\n研究完成!")
