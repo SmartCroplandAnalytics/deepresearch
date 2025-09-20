@@ -35,12 +35,17 @@ uv sync
 uv pip install -r pyproject.toml
 ```
 
-3. Set up your `.env` file to customize the environment variables (for model selection, search tools, and other configuration settings):
+3. (Optional) Install MCP filesystem server for local file access:
+```bash
+npm install -g @modelcontextprotocol/server-filesystem
+```
+
+4. Set up your `.env` file to customize the environment variables (for model selection, search tools, and other configuration settings):
 ```bash
 cp .env.example .env
 ```
 
-4. Launch agent with the LangGraph server locally:
+5. Launch agent with the LangGraph server locally:
 
 ```bash
 # Install dependencies and start the LangGraph server
