@@ -234,11 +234,13 @@ async def run_direct_research(question: str, model: str, search_api: str, docs_p
     if docs_path:
         print(f"使用文档路径: {docs_path}")
         config["configurable"]["mcp_config"] = {
-            "url": f"stdio://npx @modelcontextprotocol/server-filesystem {docs_path}",
-            "tools": ["read_file", "list_files"],
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["@modelcontextprotocol/server-filesystem", docs_path],
+            "tools": ["read_text_file", "list_directory"],
             "auth_required": False
         }
-        config["configurable"]["mcp_prompt"] = f"你可以使用read_file工具读取{docs_path}目录下的文件，list_files工具查看目录内容。优先使用本地文件中的信息进行研究。"
+        config["configurable"]["mcp_prompt"] = f"你可以使用read_text_file工具读取{docs_path}目录下的文件，list_directory工具查看目录内容。优先使用本地文件中的信息进行研究，减少AI幻觉。"
 
     print(f"\n开始执行研究流程...")
     print("=" * 50)

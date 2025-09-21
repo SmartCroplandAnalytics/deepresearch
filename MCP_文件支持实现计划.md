@@ -2,32 +2,117 @@
 
 ## 📋 项目现状分析
 
-### ✅ 已具备的基础设施
+### ✅ 已具备的基础设施 (更新)
 - **MCP核心依赖**：`langchain-mcp-adapters>=0.1.6`, `mcp>=1.9.4`
-- **完整的MCP工具加载系统**：`load_mcp_tools()` 函数
+- **完整的MCP工具加载系统**：`load_mcp_tools()` 函数 (已扩展支持stdio)
 - **认证和错误处理**：`wrap_mcp_authenticate_tool()`
-- **配置系统支持**：`mcp_config` 配置项
+- **配置系统支持**：`MCPConfig` 类 (已扩展支持双协议)
+- **ODR系统架构**：clarify_with_user → write_research_brief → research_supervisor → final_report_generation
 
-### ❌ 当前问题
-- 搜索工具不工作（缺少Tavily API密钥）
-- 没有配置本地文件访问能力
-- 无法读取项目本地的markdown和csv文件
+### ✅ 完成的集成工作
+1. **配置扩展** (src/open_deep_research/configuration.py):
+   - 扩展 MCPConfig 类支持 stdio 传输协议
+   - 添加字段：transport, command, args, cwd
+   - 保持向后兼容的 HTTP 协议支持
 
-## 🎯 实施目标
+2. **工具加载升级** (src/open_deep_research/utils.py):
+   - 修改 load_mcp_tools() 函数支持双协议
+   - 根据transport类型智能配置MCP服务器
+   - stdio: {"command": "npx", "args": ["@modelcontextprotocol/server-filesystem", path]}
 
-### 主要目标
-1. **启用本地文件读取**：支持markdown、csv、txt等文件类型
-2. **保持架构一致性**：使用MCP而非LangChain原生实现
-3. **零代码修改**：仅通过配置实现功能
+3. **CLI脚本升级**:
+   - cli_research.py: 添加 --docs-path 参数和MCP配置
+   - cli_research_direct.py: 添加本地文档支持
+   - cli_research_interactive.py: 集成MCP文档选择功能
 
-### 次要目标
-1. 修复搜索工具问题（获取Tavily API密钥或使用替代方案）
-2. 测试CSV和Markdown文件的研究能力
-3. 验证性能影响
+### ❌ 剩余工作
+- 测试完整的研究工作流
+- 验证MCP工具在LangGraph中的集成效果
 
-## 📝 详细实施步骤
+## 🚀 实施完成总结
 
-### 第一阶段：安装MCP文件系统服务器
+### 已完成的核心架构升级
+
+#### 1. 配置系统扩展 (src/open_deep_research/configuration.py)
+```python
+class MCPConfig(BaseModel):
+    # 原有HTTP配置保持不变
+    url: Optional[str] = Field(default=None, optional=True)
+    tools: Optional[List[str]] = Field(default=None, optional=True)
+    auth_required: Optional[bool] = Field(default=False, optional=True)
+
+    # 新增stdio传输配置
+    transport: Optional[Literal["http", "stdio"]] = Field(default="http", optional=True)
+    command: Optional[str] = Field(default=None, optional=True)
+    args: Optional[List[str]] = Field(default=None, optional=True)
+    cwd: Optional[str] = Field(default=None, optional=True)
+```
+
+#### 2. 工具加载系统升级 (src/open_deep_research/utils.py)
+```python
+async def load_mcp_tools(mcp_config: MCPConfig, existing_tool_names: set[str]) -> list[Tool]:
+    if mcp_config.transport == "stdio":
+        # 新的stdio配置逻辑
+        mcp_server_config = {
+            "filesystem_server": {
+                "transport": "stdio",
+                "command": mcp_config.command,
+                "args": mcp_config.args
+            }
+        }
+    else:
+        # 原有HTTP配置保持不变
+        mcp_server_config = {
+            "server": {
+                "url": mcp_config.url,
+                "auth_required": mcp_config.auth_required
+            }
+        }
+```
+
+#### 3. CLI脚本集成
+
+**A. cli_research.py**
+- 添加 `--docs-path` 参数
+- 集成MCP stdio配置逻辑
+- 支持本地文档和网络搜索混合研究
+
+**B. cli_research_direct.py**
+- 添加本地文档支持
+- 跳过澄清，直接研究本地文件
+
+**C. cli_research_interactive.py**
+- 交互式文档路径选择
+- 集成MCP配置到完整研究流程
+
+### 使用示例
+
+#### 基础研究（支持本地文档）
+```bash
+uv run cli_research.py "AI发展历史" --docs-path "./test_docs" --search none
+```
+
+#### 直接研究（跳过澄清）
+```bash
+uv run cli_research_direct.py "分析本地CSV数据" --docs-path "./test_docs"
+```
+
+#### 交互式研究（用户选择文档）
+```bash
+uv run cli_research_interactive.py "总结本地文档内容"
+```
+
+### 技术特性
+
+✅ **双协议支持**: HTTP和stdio传输并存
+✅ **向后兼容**: 现有配置无需修改
+✅ **路径验证**: 自动检查文档路径有效性
+✅ **智能提示**: 指导AI优先使用本地文件
+✅ **减少幻觉**: 基于真实文档内容研究
+
+## 📝 原始实施步骤参考
+
+### 第一阶段：安装MCP文件系统服务器 ✅
 
 ```bash
 # 1. 安装文件系统MCP服务器
@@ -37,67 +122,26 @@ npm install @modelcontextprotocol/server-filesystem
 npx @modelcontextprotocol/server-filesystem --help
 ```
 
-### 第二阶段：配置文件访问
+### 第二阶段：配置文件访问 ✅
 
-**方案A：修改交互式脚本配置**
+**已实现方案：直接集成到现有CLI脚本**
 
-在 `cli_research_interactive.py` 中添加MCP配置：
+所有主要CLI脚本现在都支持 `--docs-path` 参数：
 
 ```python
-# 在config中添加MCP配置
-config = {
-    "configurable": {
-        # ... 现有配置 ...
-
-        # 添加MCP文件系统支持
-        "mcp_config": {
-            "url": f"stdio://npx @modelcontextprotocol/server-filesystem {os.getcwd()}",
-            "tools": ["read_file", "list_files", "write_file"],
-            "auth_required": False
-        },
-        "mcp_prompt": "你可以使用read_file工具读取本地文件，list_files工具查看目录内容。优先使用本地文件中的信息进行研究。"
+# 实际实现的MCP配置格式
+if docs_path:
+    config["configurable"]["mcp_config"] = {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", os.path.abspath(docs_path)],
+        "tools": ["read_text_file", "list_directory"],
+        "auth_required": False
     }
-}
+    config["configurable"]["mcp_prompt"] = f"你可以使用read_text_file工具读取{docs_path}目录下的文件，list_directory工具查看目录内容。优先使用本地文件中的信息进行研究，减少AI幻觉。"
 ```
 
-**方案B：创建专门的本地文件研究脚本**
-
-创建 `cli_research_local_mcp.py`：
-
-```python
-#!/usr/bin/env python3
-"""
-基于MCP的本地文件研究脚本
-使用方法: python cli_research_local_mcp.py "研究问题" --docs-path "/path/to/docs"
-"""
-
-import os
-import argparse
-
-async def run_mcp_local_research(question: str, docs_path: str, model: str = "deepseek:deepseek-reasoner"):
-    # 配置MCP文件系统服务器
-    config = {
-        "configurable": {
-            # 基本配置
-            "max_structured_output_retries": 3,
-            "allow_clarification": False,
-            "max_concurrent_research_units": 3,
-            "search_api": "none",  # 禁用网络搜索，专注本地文件
-
-            # 模型配置
-            "research_model": model,
-            "research_model_max_tokens": 8192,
-
-            # MCP文件系统配置
-            "mcp_config": {
-                "url": f"stdio://npx @modelcontextprotocol/server-filesystem {docs_path}",
-                "tools": ["read_file", "list_files"],
-                "auth_required": False
-            },
-            "mcp_prompt": f"""
-你现在可以访问 {docs_path} 目录下的所有文件。
-可用工具：
-- read_file: 读取指定文件内容
+### 第三阶段：创建专门的本地文件研究脚本 ⚠️ (可选，已有替代方案)
 - list_files: 查看目录内容
 
 请基于本地文件内容进行深度研究分析。

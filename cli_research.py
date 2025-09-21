@@ -14,7 +14,7 @@ from open_deep_research.deep_researcher import deep_researcher_builder
 # 加载环境变量
 load_dotenv(".env")
 
-async def run_research(question: str, model: str = "deepseek:deepseek-reasoner", search_api: str = "tavily"):
+async def run_research(question: str, model: str = "deepseek:deepseek-reasoner", search_api: str = "tavily", allow_clarification: bool = True, docs_path: str = None):
     """运行深度研究并返回结果"""
 
     # 编译研究图
@@ -42,6 +42,22 @@ async def run_research(question: str, model: str = "deepseek:deepseek-reasoner",
             "final_report_model_max_tokens": 8192,
         }
     }
+
+    # 如果提供了文档路径，添加MCP配置
+    if docs_path:
+        import os
+        if os.path.exists(docs_path):
+            print(f"使用文档路径: {docs_path}")
+            config["configurable"]["mcp_config"] = {
+                "transport": "stdio",
+                "command": "npx",
+                "args": ["@modelcontextprotocol/server-filesystem", os.path.abspath(docs_path)],
+                "tools": ["read_text_file", "list_directory"],
+                "auth_required": False
+            }
+            config["configurable"]["mcp_prompt"] = f"你可以使用read_text_file工具读取{docs_path}目录下的文件，list_directory工具查看目录内容。优先使用本地文件中的信息进行研究，减少AI幻觉。"
+        else:
+            print(f"警告: 指定的文档路径不存在: {docs_path}")
 
     print(f"开始研究: {question}")
     print(f"使用模型: {model}")
@@ -112,12 +128,13 @@ def main():
     parser.add_argument("--model", default="deepseek:deepseek-reasoner", help="使用的模型 (默认: deepseek:deepseek-reasoner)")
     parser.add_argument("--search", default="tavily", help="搜索API (默认: tavily)")
     parser.add_argument("--no-clarify", action="store_true", help="跳过澄清步骤，直接开始研究")
+    parser.add_argument("--docs-path", help="指定要研究的本地文档路径")
 
     args = parser.parse_args()
 
     # 运行异步研究
     allow_clarification = not args.no_clarify
-    result = asyncio.run(run_research(args.question, args.model, args.search, allow_clarification))
+    result = asyncio.run(run_research(args.question, args.model, args.search, allow_clarification, args.docs_path))
 
     if result:
         print("\n研究完成!")
