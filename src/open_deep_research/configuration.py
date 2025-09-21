@@ -2,7 +2,7 @@
 
 import os
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Literal
 
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
@@ -18,12 +18,13 @@ class SearchAPI(Enum):
 
 class MCPConfig(BaseModel):
     """Configuration for Model Context Protocol (MCP) servers."""
-    
+
+    # Original HTTP configuration
     url: Optional[str] = Field(
         default=None,
         optional=True,
     )
-    """The URL of the MCP server"""
+    """The URL of the MCP server (for HTTP transport)"""
     tools: Optional[List[str]] = Field(
         default=None,
         optional=True,
@@ -34,6 +35,28 @@ class MCPConfig(BaseModel):
         optional=True,
     )
     """Whether the MCP server requires authentication"""
+
+    # New stdio transport configuration
+    transport: Optional[Literal["http", "stdio"]] = Field(
+        default="http",
+        optional=True,
+    )
+    """Transport protocol: 'http' for remote servers, 'stdio' for local servers"""
+    command: Optional[str] = Field(
+        default=None,
+        optional=True,
+    )
+    """Command to start stdio MCP server (e.g., 'npx')"""
+    args: Optional[List[str]] = Field(
+        default=None,
+        optional=True,
+    )
+    """Arguments for stdio MCP server command"""
+    cwd: Optional[str] = Field(
+        default=None,
+        optional=True,
+    )
+    """Working directory for stdio MCP server"""
 
 class Configuration(BaseModel):
     """Main configuration class for the Deep Research agent."""

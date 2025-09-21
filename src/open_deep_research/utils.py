@@ -468,31 +468,56 @@ async def load_mcp_tools(
         mcp_tokens = None
     
     # Step 2: Validate configuration requirements
-    config_valid = (
-        configurable.mcp_config and 
-        configurable.mcp_config.url and 
-        configurable.mcp_config.tools and 
-        (mcp_tokens or not configurable.mcp_config.auth_required)
-    )
-    
+    mcp_config = configurable.mcp_config
+    if not mcp_config or not mcp_config.tools:
+        return []
+
+    # Validate based on transport type
+    if mcp_config.transport == "stdio":
+        # For stdio: need command and args
+        config_valid = (
+            mcp_config.command and
+            mcp_config.args and
+            (mcp_tokens or not mcp_config.auth_required)
+        )
+    else:
+        # For http: need URL
+        config_valid = (
+            mcp_config.url and
+            (mcp_tokens or not mcp_config.auth_required)
+        )
+
     if not config_valid:
         return []
-    
-    # Step 3: Set up MCP server connection
-    server_url = configurable.mcp_config.url.rstrip("/") + "/mcp"
-    
-    # Configure authentication headers if tokens are available
-    auth_headers = None
-    if mcp_tokens:
-        auth_headers = {"Authorization": f"Bearer {mcp_tokens['access_token']}"}
-    
-    mcp_server_config = {
-        "server_1": {
-            "url": server_url,
-            "headers": auth_headers,
-            "transport": "streamable_http"
+
+    # Step 3: Set up MCP server connection based on transport
+    if mcp_config.transport == "stdio":
+        # Configure stdio MCP server
+        mcp_server_config = {
+            "filesystem_server": {
+                "transport": "stdio",
+                "command": mcp_config.command,
+                "args": mcp_config.args
+            }
         }
-    }
+        if mcp_config.cwd:
+            mcp_server_config["filesystem_server"]["cwd"] = mcp_config.cwd
+    else:
+        # Configure HTTP MCP server (original logic)
+        server_url = mcp_config.url.rstrip("/") + "/mcp"
+
+        # Configure authentication headers if tokens are available
+        auth_headers = None
+        if mcp_tokens:
+            auth_headers = {"Authorization": f"Bearer {mcp_tokens['access_token']}"}
+
+        mcp_server_config = {
+            "server_1": {
+                "url": server_url,
+                "headers": auth_headers,
+                "transport": "streamable_http"
+            }
+        }
     # TODO: When Multi-MCP Server support is merged in OAP, update this code
     
     # Step 4: Load tools from MCP server
@@ -514,7 +539,7 @@ async def load_mcp_tools(
             continue
         
         # Only include tools specified in configuration
-        if mcp_tool.name not in set(configurable.mcp_config.tools):
+        if mcp_tool.name not in set(mcp_config.tools):
             continue
         
         # Wrap tool with authentication handling and add to list

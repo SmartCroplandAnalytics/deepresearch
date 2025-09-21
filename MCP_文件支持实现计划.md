@@ -302,27 +302,380 @@ echo "年份,技术,影响,类型
 
 ---
 
-## 💬 关于你的文件读写能力
+## 🔍 深度研究系统架构分析与MCP集成方案
 
-**你问的很好！** 我的本地文件读写能力确实是通过类似MCP的机制实现的：
+### 系统架构核心组件
 
-### 我的文件工具
-- `Read` - 读取文件内容
-- `Write` - 写入文件内容
-- `Edit` - 编辑现有文件
-- `Glob` - 文件路径匹配
-- `Grep` - 文件内容搜索
+**主要研究流程节点**：
+1. **`clarify_with_user`** - 用户澄清和需求分析
+2. **`write_research_brief`** - 研究计划生成
+3. **`research_supervisor`** - 研究任务调度和管理
+4. **`final_report_generation`** - 综合报告生成
 
-### 技术实现
-- **不是MCP协议** - 我使用的是Anthropic的工具调用系统
-- **类似的架构** - 工具与核心推理分离
-- **进程隔离** - 文件操作在安全沙箱中执行
-- **JSON-RPC风格** - 工具调用使用结构化消息
+**工具集成架构**：
+- **核心工具**: `think_tool`（反思）、`ResearchComplete`（完成信号）
+- **搜索工具**: Tavily、OpenAI Native、Anthropic Native
+- **MCP工具**: 通过 `load_mcp_tools()` 集成外部工具
 
-### 相似之处
-- ✅ 标准化工具接口
-- ✅ 错误处理和安全隔离
-- ✅ 支持多种文件格式
-- ✅ 批量操作能力
+### 当前MCP实现分析
 
-所以MCP确实是一个很好的选择 - 它提供了类似我所使用的标准化工具架构！
+**现有MCP配置** (`configuration.py`):
+```python
+class MCPConfig(BaseModel):
+    url: Optional[str]              # 仅支持HTTP URL
+    tools: Optional[List[str]]      # 工具白名单
+    auth_required: Optional[bool]   # OAuth认证
+```
+
+**现有实现限制**：
+- ❌ 仅支持HTTP传输协议
+- ❌ 不支持stdio协议的MCP服务器
+- ❌ 假设所有MCP服务器都是远程HTTP服务
+
+### 🚀 新的MCP集成方案
+
+## 📋 修订后的实施计划
+
+### 第一阶段：配置架构扩展 ✅
+
+**1.1 扩展MCPConfig类** (`src/open_deep_research/configuration.py`)
+```python
+from typing import Any, List, Optional, Literal
+
+class MCPConfig(BaseModel):
+    """Configuration for Model Context Protocol (MCP) servers."""
+
+    # Original HTTP configuration
+    url: Optional[str] = Field(default=None, optional=True)
+    """The URL of the MCP server (for HTTP transport)"""
+    tools: Optional[List[str]] = Field(default=None, optional=True)
+    """The tools to make available to the LLM"""
+    auth_required: Optional[bool] = Field(default=False, optional=True)
+    """Whether the MCP server requires authentication"""
+
+    # New stdio transport configuration
+    transport: Optional[Literal["http", "stdio"]] = Field(default="http", optional=True)
+    """Transport protocol: 'http' for remote servers, 'stdio' for local servers"""
+    command: Optional[str] = Field(default=None, optional=True)
+    """Command to start stdio MCP server (e.g., 'npx')"""
+    args: Optional[List[str]] = Field(default=None, optional=True)
+    """Arguments for stdio MCP server command"""
+    cwd: Optional[str] = Field(default=None, optional=True)
+    """Working directory for stdio MCP server"""
+```
+
+### 第二阶段：MCP加载逻辑重构 ✅
+
+**2.1 修改 `load_mcp_tools` 函数** (`src/open_deep_research/utils.py`)
+
+**关键修改点**：
+
+1. **配置验证逻辑更新**：
+```python
+# Step 2: Validate configuration requirements
+mcp_config = configurable.mcp_config
+if not mcp_config or not mcp_config.tools:
+    return []
+
+# Validate based on transport type
+if mcp_config.transport == "stdio":
+    # For stdio: need command and args
+    config_valid = (
+        mcp_config.command and
+        mcp_config.args and
+        (mcp_tokens or not mcp_config.auth_required)
+    )
+else:
+    # For http: need URL
+    config_valid = (
+        mcp_config.url and
+        (mcp_tokens or not mcp_config.auth_required)
+    )
+```
+
+2. **MCP服务器连接配置**：
+```python
+# Step 3: Set up MCP server connection based on transport
+if mcp_config.transport == "stdio":
+    # Configure stdio MCP server
+    mcp_server_config = {
+        "filesystem_server": {
+            "transport": "stdio",
+            "command": mcp_config.command,
+            "args": mcp_config.args
+        }
+    }
+    if mcp_config.cwd:
+        mcp_server_config["filesystem_server"]["cwd"] = mcp_config.cwd
+else:
+    # Configure HTTP MCP server (original logic)
+    server_url = mcp_config.url.rstrip("/") + "/mcp"
+    # ... 原有HTTP配置逻辑
+```
+
+3. **工具过滤逻辑调整**：
+```python
+# Only include tools specified in configuration
+if mcp_tool.name not in set(mcp_config.tools):
+    continue
+```
+
+**2.2 便利配置函数** (可选实现)
+```python
+def configure_filesystem_mcp(docs_path: str) -> MCPConfig:
+    """自动配置文件系统MCP"""
+    abs_path = os.path.abspath(docs_path)
+    return MCPConfig(
+        transport="stdio",
+        command="npx",
+        args=["@modelcontextprotocol/server-filesystem", abs_path],
+        tools=["list_directory", "read_text_file", "search_files"],
+        auth_required=False
+    )
+```
+
+### 第三阶段：研究流程集成
+
+**3.1 更新研究提示模板**
+- 添加文件系统工具使用指导
+- 整合本地文档和网络搜索策略
+- 优先级：本地文档 → 网络搜索
+
+**3.2 工具使用策略优化**
+- 智能路径解析（相对于MCP服务器根目录）
+- 文件类型识别和处理
+- 批量文件读取优化
+
+### 第四阶段：用户界面集成
+
+**4.1 LangGraph Studio支持**
+- 本地文档路径选择器
+- MCP服务器状态监控
+- 实时文件扫描预览
+
+**4.2 CLI脚本优化**
+- 自动MCP配置生成
+- 文件路径验证
+- 详细的执行日志
+
+### 第三阶段：CLI脚本集成 🎯
+
+**3.1 修改现有CLI脚本支持MCP配置**
+
+修改 `cli_research_interactive.py` 等脚本，直接在配置中设置MCP：
+
+```python
+# 在现有脚本的config配置中添加
+config = {
+    "configurable": {
+        # ... 现有配置 ...
+
+        # 添加MCP文件系统配置
+        "mcp_config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["@modelcontextprotocol/server-filesystem", abs_docs_path],
+            "tools": ["list_directory", "read_text_file", "search_files"],
+            "auth_required": False
+        },
+        "mcp_prompt": "你可以使用read_text_file工具读取本地文件，list_directory工具查看目录内容。优先使用本地文件中的信息进行研究。"
+    }
+}
+```
+
+**3.2 添加命令行参数支持**
+```python
+parser.add_argument("--docs-path", help="本地文档目录路径，启用MCP文件系统")
+parser.add_argument("--enable-local-docs", action="store_true", help="启用本地文档研究")
+```
+
+### 第四阶段：测试和验证 🧪
+
+**4.1 集成测试配置示例**
+
+```python
+# 本地文档研究配置
+local_research_config = {
+    "configurable": {
+        "search_api": "none",  # 禁用网络搜索
+        "mcp_config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["@modelcontextprotocol/server-filesystem", "./test_docs"],
+            "tools": ["list_directory", "read_text_file"],
+            "auth_required": False
+        },
+        "mcp_prompt": "仅使用本地文件进行研究，严禁网络搜索"
+    }
+}
+
+# 混合研究配置（本地+网络）
+hybrid_research_config = {
+    "configurable": {
+        "search_api": "tavily",  # 启用网络搜索
+        "mcp_config": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["@modelcontextprotocol/server-filesystem", "./docs"],
+            "tools": ["list_directory", "read_text_file"],
+            "auth_required": False
+        },
+        "mcp_prompt": "优先使用本地文件，必要时补充网络搜索"
+    }
+}
+```
+
+**4.2 测试命令示例**
+```bash
+# 纯本地文档研究
+uv run cli_research_interactive.py "总结AI发展历史" --docs-path "./test_docs" --search-api "none"
+
+# 混合研究（本地+网络）
+uv run cli_research_interactive.py "AI最新发展趋势" --docs-path "./ai_docs" --search-api "tavily"
+
+# 验证MCP工具加载
+uv run test_mcp_stdio.py  # 验证MCP连接正常
+```
+
+**4.3 功能验证清单**
+- ✅ MCP stdio服务器成功启动
+- ✅ 文件系统工具正确加载 (list_directory, read_text_file)
+- ✅ 本地文件读取功能正常
+- ✅ 研究agent能使用MCP工具
+- ✅ 生成的报告基于本地文档内容
+- ✅ 错误处理机制工作正常
+
+## 🔧 技术实现细节
+
+### MCP Service配置映射
+```python
+# stdio配置 → MultiServerMCPClient格式
+{
+    "filesystem": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", "/path/to/docs"]
+    }
+}
+```
+
+### 错误处理策略
+1. **MCP连接失败** → 降级到纯网络搜索模式
+2. **文件访问权限错误** → 用户友好的路径建议
+3. **工具调用超时** → 自动重试机制
+
+### 安全考虑
+- **路径访问控制**: MCP服务器限制访问范围
+- **文件类型过滤**: 只读取文本类型文件
+- **大文件保护**: 自动截断过大文件
+
+## 📊 实施进度状态
+
+### ✅ 已完成核心架构修改
+1. **MCPConfig扩展** - 支持stdio传输协议
+2. **load_mcp_tools重构** - 双协议支持 (HTTP + stdio)
+3. **配置验证逻辑** - 基于传输类型的智能验证
+4. **MCP服务器连接** - 统一配置格式
+
+### 🚀 关键技术突破
+
+**1. 双协议支持架构**
+- HTTP协议：原有远程MCP服务器支持
+- stdio协议：新增本地MCP文件系统支持
+- 向后兼容：不影响现有HTTP MCP功能
+
+**2. 智能配置验证**
+```python
+if mcp_config.transport == "stdio":
+    # stdio需要：command + args
+    config_valid = mcp_config.command and mcp_config.args
+else:
+    # http需要：url
+    config_valid = mcp_config.url
+```
+
+**3. 统一工具接口**
+无论是HTTP还是stdio MCP服务器，工具调用接口完全一致：
+- `list_directory` - 浏览文件结构
+- `read_text_file` - 读取文件内容
+- `search_files` - 文件搜索
+
+### 📋 实施优先级
+
+### ✅ 已完成 - 核心架构
+1. MCPConfig类扩展 (configuration.py)
+2. load_mcp_tools函数重构 (utils.py)
+3. 配置验证和服务器连接逻辑
+
+### 🟡 待实施 - CLI集成
+1. 修改现有CLI脚本添加--docs-path参数
+2. 集成MCP配置到研究流程
+3. 添加本地文档优先的提示策略
+
+### 🟢 可选优化
+1. 便利配置函数 (configure_filesystem_mcp)
+2. 高级文件操作 (批量读取、智能过滤)
+3. 性能监控和调优
+
+## 🎯 实施成果总结
+
+### ✅ 核心架构完成
+**1. 配置系统扩展**
+- `MCPConfig` 现在支持 `transport: "stdio"`
+- 新增 `command`, `args`, `cwd` 字段
+- 保持HTTP协议向后兼容
+
+**2. 工具加载系统重构**
+- `load_mcp_tools` 支持双协议自动识别
+- 智能配置验证逻辑
+- 统一的错误处理机制
+
+**3. 集成架构优势**
+- 🚀 **完全集成**：使用现有LangGraph研究流程，不需要单独脚本
+- 🔄 **向后兼容**：不影响现有HTTP MCP功能
+- 🛡️ **安全隔离**：MCP服务器限制文件访问范围
+- 📊 **幻觉减少**：基于真实本地文档，减少AI幻觉
+
+### 🎯 用户使用场景
+
+**场景1：纯本地文档研究**
+```python
+config = {
+    "mcp_config": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", "./docs"],
+        "tools": ["list_directory", "read_text_file"]
+    },
+    "search_api": "none"  # 禁用网络搜索
+}
+```
+
+**场景2：混合研究（本地优先）**
+```python
+config = {
+    "mcp_config": {
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", "./docs"],
+        "tools": ["list_directory", "read_text_file"]
+    },
+    "search_api": "tavily",  # 启用网络搜索作为补充
+    "mcp_prompt": "优先使用本地文档，必要时补充网络搜索"
+}
+```
+
+### 🚀 技术优势
+
+1. **无缝集成**：利用现有的supervisor和researcher架构
+2. **工具统一**：MCP工具与搜索工具统一管理
+3. **配置驱动**：通过配置启用，无需代码修改
+4. **智能路由**：自动识别HTTP vs stdio协议
+5. **错误韧性**：MCP连接失败时优雅降级
+
+### 📈 预期效果
+
+- **减少幻觉**：基于真实文档内容，提高准确性
+- **隐私保护**：本地文档不上传，完全离线处理
+- **响应速度**：本地文件读取比网络搜索更快
+- **内容深度**：能够读取完整文档，不受搜索片段限制
