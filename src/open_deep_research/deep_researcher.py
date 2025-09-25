@@ -43,16 +43,21 @@ from open_deep_research.utils import (
     anthropic_websearch_called,
     get_all_tools,
     get_api_key_for_model,
+    get_configured_chat_model,
+    get_configured_chat_model_with_structured_output,
     get_model_token_limit,
     get_notes_from_tool_calls,
+    get_model_config,
     get_today_str,
     is_token_limit_exceeded,
     openai_websearch_called,
     remove_up_to_last_ai_message,
+    supports_structured_output,
     think_tool,
 )
 
-# Initialize a configurable model that we will use throughout the agent
+
+# Original configurable model for compatibility
 configurable_model = init_chat_model(
     configurable_fields=("model", "max_tokens", "api_key"),
 )
@@ -85,12 +90,13 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         "tags": ["langsmith:nostream"]
     }
     
-    # Configure model with structured output and retry logic
-    clarification_model = (
-        configurable_model
-        .with_structured_output(ClarifyWithUser)
-        .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
-        .with_config(model_config)
+    # Configure model with structured output and retry logic (支持DeepSeek等不支持结构化输出的模型)
+    clarification_model = get_configured_chat_model_with_structured_output(
+        configurable.research_model,
+        configurable.research_model_max_tokens,
+        get_api_key_for_model(configurable.research_model, config),
+        ClarifyWithUser,
+        configurable.max_structured_output_retries
     )
     
     # Step 3: Analyze whether clarification is needed
@@ -138,12 +144,13 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         "tags": ["langsmith:nostream"]
     }
     
-    # Configure model for structured research question generation
-    research_model = (
-        configurable_model
-        .with_structured_output(ResearchQuestion)
-        .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
-        .with_config(research_model_config)
+    # Configure model for structured research question generation with enhanced support (支持DeepSeek等不支持结构化输出的模型)
+    research_model = get_configured_chat_model_with_structured_output(
+        configurable.research_model,
+        configurable.research_model_max_tokens,
+        get_api_key_for_model(configurable.research_model, config),
+        ResearchQuestion,
+        configurable.max_structured_output_retries
     )
     
     # Step 2: Generate structured research brief from user messages
@@ -202,11 +209,15 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> Command[
     lead_researcher_tools = [ConductResearch, ResearchComplete, think_tool]
     
     # Configure model with tools, retry logic, and model settings
+    base_supervisor_model = get_configured_chat_model(
+        configurable.research_model,
+        configurable.research_model_max_tokens,
+        get_api_key_for_model(configurable.research_model, config)
+    )
     research_model = (
-        configurable_model
+        base_supervisor_model
         .bind_tools(lead_researcher_tools)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
-        .with_config(research_model_config)
     )
     
     # Step 2: Generate supervisor response based on current context
@@ -403,11 +414,15 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
     )
     
     # Configure model with tools, retry logic, and settings
+    base_researcher_model = get_configured_chat_model(
+        configurable.research_model,
+        configurable.research_model_max_tokens,
+        get_api_key_for_model(configurable.research_model, config)
+    )
     research_model = (
-        configurable_model
+        base_researcher_model
         .bind_tools(tools)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
-        .with_config(research_model_config)
     )
     
     # Step 3: Generate researcher response with system context
@@ -524,12 +539,11 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     """
     # Step 1: Configure the compression model
     configurable = Configuration.from_runnable_config(config)
-    synthesizer_model = configurable_model.with_config({
-        "model": configurable.compression_model,
-        "max_tokens": configurable.compression_model_max_tokens,
-        "api_key": get_api_key_for_model(configurable.compression_model, config),
-        "tags": ["langsmith:nostream"]
-    })
+    synthesizer_model = get_configured_chat_model(
+        configurable.compression_model,
+        configurable.compression_model_max_tokens,
+        get_api_key_for_model(configurable.compression_model, config)
+    )
     
     # Step 2: Prepare messages for compression
     researcher_messages = state.get("researcher_messages", [])
@@ -646,8 +660,13 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 date=get_today_str()
             )
             
-            # Generate the final report
-            final_report = await configurable_model.with_config(writer_model_config).ainvoke([
+            # Generate the final report using properly configured model
+            final_report_model = get_configured_chat_model(
+                configurable.final_report_model,
+                configurable.final_report_model_max_tokens,
+                get_api_key_for_model(configurable.final_report_model, config)
+            )
+            final_report = await final_report_model.ainvoke([
                 HumanMessage(content=final_report_prompt)
             ])
             

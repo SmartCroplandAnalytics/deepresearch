@@ -34,6 +34,69 @@ from open_deep_research.prompts import summarize_webpage_prompt
 from open_deep_research.state import ResearchComplete, Summary
 
 ##########################
+# Model Configuration Utils
+##########################
+def supports_structured_output(model_name: str) -> bool:
+    """Check if a model supports structured output (JSON mode)."""
+    model_name = model_name.lower()
+
+    # Qwen models support structured output
+    if model_name.startswith("qwen-"):
+        return True
+
+    # DeepSeek models currently don't support structured output
+    if model_name.startswith("deepseek-"):
+        return False
+
+    # OpenAI, Anthropic, Google models generally support structured output
+    if any(provider in model_name for provider in ["gpt", "claude", "gemini", "openai", "anthropic"]):
+        return True
+
+    # Default to False for unknown models to be safe
+    return False
+
+def get_configured_chat_model_with_structured_output(model_name: str, max_tokens: int, api_key: str, output_schema=None, with_retry_attempts: int = 3):
+    """Get a chat model with structured output support, with fallback for unsupported models."""
+    base_model = get_configured_chat_model(model_name, max_tokens, api_key)
+
+    if output_schema and supports_structured_output(model_name):
+        # Model supports structured output
+        return base_model.with_structured_output(output_schema).with_retry(stop_after_attempt=with_retry_attempts)
+    elif output_schema:
+        # Model doesn't support structured output, use text output with JSON parsing
+        from langchain_core.output_parsers import PydanticOutputParser
+        parser = PydanticOutputParser(pydantic_object=output_schema)
+        return (base_model | parser).with_retry(stop_after_attempt=with_retry_attempts)
+    else:
+        # No structured output needed
+        return base_model.with_retry(stop_after_attempt=with_retry_attempts)
+
+def get_configured_chat_model(model_name: str, max_tokens: int, api_key: str):
+    """Get a properly configured chat model with special handling for Qwen and DeepSeek."""
+
+    # Handle special model configurations (Qwen and DeepSeek)
+    if model_name.lower().startswith(("qwen-", "deepseek-")):
+        model_config = get_model_config(model_name)
+        if model_config:
+            # 明确指定模型提供者
+            model_provider = "openai"
+            return init_chat_model(
+                model=model_config["model"],
+                model_provider=model_provider,
+                max_tokens=max_tokens,
+                api_key=api_key,
+                base_url=model_config["base_url"],
+                **model_config.get("model_kwargs", {})
+            )
+
+    # Default model initialization
+    return init_chat_model(
+        model=model_name,
+        max_tokens=max_tokens,
+        api_key=api_key,
+    )
+
+##########################
 # Tavily Search Tool Utils
 ##########################
 TAVILY_SEARCH_DESCRIPTION = (
@@ -81,15 +144,15 @@ async def tavily_search(
     # Character limit to stay within model token limits (configurable)
     max_char_to_include = configurable.max_content_length
     
-    # Initialize summarization model with retry logic
+    # Initialize summarization model with retry logic (支持DeepSeek等不支持结构化输出的模型)
     model_api_key = get_api_key_for_model(configurable.summarization_model, config)
-    summarization_model = init_chat_model(
-        model=configurable.summarization_model,
-        max_tokens=configurable.summarization_model_max_tokens,
-        api_key=model_api_key,
-        tags=["langsmith:nostream"]
-    ).with_structured_output(Summary).with_retry(
-        stop_after_attempt=configurable.max_structured_output_retries
+
+    summarization_model = get_configured_chat_model_with_structured_output(
+        configurable.summarization_model,
+        configurable.summarization_model_max_tokens,
+        model_api_key,
+        Summary,
+        configurable.max_structured_output_retries
     )
     
     # Step 4: Create summarization tasks (skip empty content)
@@ -829,6 +892,18 @@ MODEL_TOKEN_LIMITS = {
     "anthropic:claude-3-5-haiku": 200000,
     "google:gemini-1.5-pro": 2097152,
     "google:gemini-1.5-flash": 1048576,
+    # DeepSeek models
+    "deepseek-chat": 128000,
+    "deepseek-reasoner": 128000,
+    "deepseek:chat": 128000,
+    "deepseek:reasoning": 128000,
+    # Qwen models
+    "qwen-plus": 128000,
+    "qwen-flash": 128000,
+    "qwen:plus": 128000,
+    "qwen:flash": 128000,
+    "qwen:plus-think": 128000,
+    "qwen:flash-think": 128000,
     "google:gemini-pro": 32768,
     "cohere:command-r-plus": 128000,
     "cohere:command-r": 128000,
@@ -928,15 +1003,50 @@ def get_api_key_for_model(model_name: str, config: RunnableConfig):
             return api_keys.get("ANTHROPIC_API_KEY")
         elif model_name.startswith("google"):
             return api_keys.get("GOOGLE_API_KEY")
+        elif model_name.startswith("qwen:"):
+            return api_keys.get("QWEN_API_KEY")
+        elif model_name.startswith("deepseek:"):
+            return api_keys.get("DEEPSEEK_API_KEY")
         return None
     else:
-        if model_name.startswith("openai:"): 
+        if model_name.startswith("openai:"):
             return os.getenv("OPENAI_API_KEY")
         elif model_name.startswith("anthropic:"):
             return os.getenv("ANTHROPIC_API_KEY")
         elif model_name.startswith("google"):
             return os.getenv("GOOGLE_API_KEY")
+        elif model_name.startswith(("qwen-", "qwen:")):
+            return os.getenv("QWEN_API_KEY")
+        elif model_name.startswith(("deepseek-", "deepseek:")):
+            return os.getenv("DEEPSEEK_API_KEY")
         return None
+
+def get_model_config(model_name: str) -> dict:
+    """Get model configuration for Qwen and DeepSeek models."""
+    model_name = model_name.lower()
+
+    # Qwen 模型配置
+    if model_name.startswith("qwen-"):
+        config = {
+            "model": model_name,
+            "base_url": os.getenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        }
+        return config
+
+    # DeepSeek 模型配置
+    elif model_name.startswith("deepseek-"):
+        config = {
+            "model": model_name,
+            "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        }
+        return config
+
+    return {}
+
+# 保持向后兼容
+def get_qwen_model_config(model_name: str) -> dict:
+    """Get Qwen model configuration - deprecated, use get_model_config instead."""
+    return get_model_config(model_name)
 
 def get_tavily_api_key(config: RunnableConfig):
     """Get Tavily API key from environment or config."""
