@@ -68,21 +68,25 @@ class ResearchConfig:
                 "research_model_max_tokens": self.max_tokens,
                 "compression_model": self.model,
                 "compression_model_max_tokens": self.max_tokens,
-                "final_report_model": self.model,
-                "final_report_model_max_tokens": self.max_tokens,
+                # 使用 qwen-plus 生成最终报告以获得更长更详细的输出
+                "final_report_model": "qwen-plus",
+                "final_report_model_max_tokens": self.max_tokens,  # 使用用户传入的max_tokens
             }
         }
 
-        # 配置MCP本地文档支持
+        # 配置MCP本地文档支持（有本地文档时自动启用）
         if self.docs_path and os.path.exists(self.docs_path):
+            from pathlib import Path
+            mcp_server_path = Path(__file__).parent / "mcp_runtime" / "node_modules" / "@modelcontextprotocol" / "server-filesystem" / "dist" / "index.js"
+
+            # Windows路径兼容：将反斜杠转换为正斜杠（Node.js兼容格式）
+            abs_mcp_path = str(mcp_server_path.absolute()).replace('\\', '/')
+            abs_docs_path = str(Path(self.docs_path).absolute()).replace('\\', '/')
+
             config["configurable"]["mcp_config"] = {
                 "transport": "stdio",
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@modelcontextprotocol/server-filesystem",
-                    os.path.abspath(self.docs_path)
-                ],
+                "command": "node",
+                "args": [abs_mcp_path, abs_docs_path],
                 "tools": ["read_text_file", "list_directory", "read_file"],
                 "auth_required": False
             }
@@ -307,8 +311,10 @@ async def run_research(question: str, config: ResearchConfig) -> Optional[dict]:
         return final_result
 
     except Exception as e:
-        print(f"❌ 研究过程出错: {e}")
+        error_msg = str(e) if str(e) else f"{type(e).__name__} (无错误消息)"
+        print(f"❌ 研究过程出错: {error_msg}")
         import traceback
+        print("\n详细错误信息:")
         traceback.print_exc()
         return None
 

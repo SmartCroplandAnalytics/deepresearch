@@ -457,24 +457,58 @@ def wrap_mcp_authenticate_tool(tool: StructuredTool) -> StructuredTool:
     original_coroutine = tool.coroutine
     
     async def authentication_wrapper(**kwargs):
-        """Enhanced coroutine with MCP error handling and user-friendly messages."""
-        
+        """Enhanced coroutine with MCP error handling, pool management, and user-friendly messages."""
+        from datetime import datetime
+
         def _find_mcp_error_in_exception_chain(exc: BaseException) -> McpError | None:
             """Recursively search for MCP errors in exception chains."""
             if isinstance(exc, McpError):
                 return exc
-            
+
             # Handle ExceptionGroup (Python 3.11+) by checking attributes
             if hasattr(exc, 'exceptions'):
                 for sub_exception in exc.exceptions:
                     if found_error := _find_mcp_error_in_exception_chain(sub_exception):
                         return found_error
             return None
-        
+
+        # Check if this tool has a pool attached (for MCP tools)
+        pool = getattr(tool, '_mcp_pool', None)
+
         try:
-            # Execute the original tool functionality
-            return await original_coroutine(**kwargs)
-            
+            # If pool exists, acquire a client for this tool call
+            if pool:
+                print(f"[{datetime.now()}] 🔧 Tool '{tool.name}': Acquiring client from pool...")
+                client = await pool.acquire()
+                print(f"[{datetime.now()}] 🔧 Tool '{tool.name}': Client acquired")
+
+            try:
+                # Execute the original tool functionality with timeout protection
+                import asyncio
+                # Different timeouts for different operations
+                timeout = 120.0  # Default: 2 minutes for file operations
+                if tool.name == "list_directory":
+                    timeout = 60.0  # 1 minute for listing directories
+
+                result = await asyncio.wait_for(
+                    original_coroutine(**kwargs),
+                    timeout=timeout
+                )
+
+                return result
+            finally:
+                # Always release client back to pool after tool execution
+                if pool:
+                    await pool.release(client)
+                    print(f"[{datetime.now()}] 🔧 Tool '{tool.name}': Client released")
+
+        except asyncio.TimeoutError:
+            # MCP tool call timed out
+            raise ToolException(
+                f"MCP tool '{tool.name}' timed out after {timeout} seconds. "
+                "The operation may be taking too long or encountering issues."
+            )
+
         except BaseException as original_error:
             # Search for MCP-specific errors in the exception chain
             mcp_error = _find_mcp_error_in_exception_chain(original_error)
@@ -509,19 +543,328 @@ def wrap_mcp_authenticate_tool(tool: StructuredTool) -> StructuredTool:
     tool.coroutine = authentication_wrapper
     return tool
 
+# MCP Client Pool for handling concurrent access
+class MCPClientPool:
+    """True resource pool for MCP clients with acquire/release semantics.
+
+    Best practice: Each researcher acquires an exclusive MCP client from the pool,
+    uses it for the entire research session, then releases it back. This prevents
+    stdio conflicts while allowing true parallelism up to pool_size.
+
+    Architecture:
+    - pool_size clients are pre-created (based on CPU cores)
+    - asyncio.Queue manages available clients
+    - Researcher acquires → uses exclusively → releases
+    """
+
+    def __init__(self, mcp_config: dict, pool_size: int):
+        """Initialize MCP client pool.
+
+        Args:
+            mcp_config: MCP server configuration
+            pool_size: Maximum number of concurrent MCP clients (based on CPU cores)
+        """
+        self.mcp_config = mcp_config
+        self.pool_size = pool_size
+        self.available_clients = asyncio.Queue(maxsize=pool_size)  # Queue of available clients
+        self.all_clients: list = []  # All created clients (for cleanup)
+        self.init_lock = asyncio.Lock()  # Protect pool initialization
+        self.initialized = False
+        self.cached_tools: list = []  # Cached tool list to avoid repeated get_tools() calls
+
+        from datetime import datetime
+        print(f"[{datetime.now()}] 🏊 MCP Pool: Created with size {pool_size} (CPU-based)")
+
+    async def _initialize_pool(self):
+        """Pre-create all clients in the pool and cache the tool list (lazy initialization on first use)."""
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+        from datetime import datetime
+
+        async with self.init_lock:
+            if self.initialized:
+                return
+
+            print(f"[{datetime.now()}] 🏊 MCP Pool: Initializing {self.pool_size} clients...")
+
+            # Create the first client and get tools from it ONCE
+            print(f"[{datetime.now()}] 🔌 MCP Pool: Creating client #1/{self.pool_size}...")
+            first_client = MultiServerMCPClient(self.mcp_config)
+
+            # Register for cleanup
+            global _mcp_clients
+            _mcp_clients.append(first_client)
+            self.all_clients.append(first_client)
+
+            # Get tools ONCE from the first client and cache
+            print(f"[{datetime.now()}] 📋 MCP Pool: Fetching tool list from first client...")
+            try:
+                self.cached_tools = await asyncio.wait_for(first_client.get_tools(), timeout=60.0)
+                print(f"[{datetime.now()}] ✅ MCP Pool: Cached {len(self.cached_tools)} tools")
+            except Exception as e:
+                print(f"[{datetime.now()}] ⚠️  MCP Pool: Failed to get tools: {e}")
+                self.cached_tools = []
+
+            # Put first client into available queue
+            await self.available_clients.put(first_client)
+            print(f"[{datetime.now()}] ✅ MCP Pool: Client #1 ready")
+
+            # Create remaining clients (no need to get_tools from each)
+            for i in range(1, self.pool_size):
+                print(f"[{datetime.now()}] 🔌 MCP Pool: Creating client #{i+1}/{self.pool_size}...")
+                client = MultiServerMCPClient(self.mcp_config)
+
+                # Register for cleanup
+                _mcp_clients.append(client)
+                self.all_clients.append(client)
+
+                # Put into available queue
+                await self.available_clients.put(client)
+                print(f"[{datetime.now()}] ✅ MCP Pool: Client #{i+1} ready")
+
+            self.initialized = True
+            print(f"[{datetime.now()}] 🏊 MCP Pool: All {self.pool_size} clients initialized")
+
+    async def acquire(self):
+        """Acquire an exclusive MCP client from the pool.
+
+        Blocks if all clients are in use. Returns a client that the caller
+        owns exclusively until release() is called.
+
+        Returns:
+            MCP client instance for exclusive use
+        """
+        from datetime import datetime
+
+        # Lazy initialize pool on first acquire
+        if not self.initialized:
+            await self._initialize_pool()
+
+        # Wait for available client (blocks if pool is full)
+        client = await self.available_clients.get()
+        current_available = self.available_clients.qsize()
+        print(f"[{datetime.now()}] 🏊 MCP Pool: Acquired client (available: {current_available}/{self.pool_size})")
+
+        return client
+
+    async def release(self, client):
+        """Release a client back to the pool.
+
+        Args:
+            client: The MCP client to return to the pool
+        """
+        from datetime import datetime
+
+        await self.available_clients.put(client)
+        current_available = self.available_clients.qsize()
+        print(f"[{datetime.now()}] 🏊 MCP Pool: Released client (available: {current_available}/{self.pool_size})")
+
+    async def get_cached_tools(self):
+        """Get the cached tool list without calling get_tools().
+
+        This method ensures pool is initialized and returns the pre-cached tool list,
+        avoiding stdio contention when multiple researchers request tools simultaneously.
+
+        Returns:
+            List of cached tools from the pool
+        """
+        from datetime import datetime
+
+        # Ensure pool is initialized (will cache tools on first call)
+        if not self.initialized:
+            await self._initialize_pool()
+
+        print(f"[{datetime.now()}] 📋 MCP Pool: Returning {len(self.cached_tools)} cached tools")
+        return self.cached_tools
+
+    async def get_tools_from_client(self, client):
+        """Get tools from a specific client (deprecated - use get_cached_tools instead).
+
+        Args:
+            client: MCP client to get tools from
+
+        Returns:
+            List of tools from the client
+        """
+        from datetime import datetime
+
+        try:
+            tools = await asyncio.wait_for(client.get_tools(), timeout=30.0)
+            print(f"[{datetime.now()}] ✅ MCP Pool: Got {len(tools)} tools from client")
+            return tools
+        except asyncio.TimeoutError:
+            print(f"[{datetime.now()}] ⚠️  MCP Pool: Client get_tools timed out after 30 seconds")
+            raise
+        except Exception as e:
+            print(f"[{datetime.now()}] ⚠️  MCP Pool: Client get_tools failed: {e}")
+            raise
+
+# Global registry
+_mcp_clients: list = []  # All created MCP clients (for cleanup)
+_mcp_client_pools: dict = {}  # Pools by config hash (one pool per docs_path)
+_cleanup_registered = False
+
+
+def _calculate_mcp_pool_size() -> int:
+    """Calculate optimal MCP client pool size based on CPU cores.
+
+    Strategy:
+    - 1-4 cores: pool_size = 2 (minimal parallelism)
+    - 5-8 cores: pool_size = 3 (moderate parallelism)
+    - 9-16 cores: pool_size = 5 (good parallelism)
+    - 17+ cores: pool_size = 8 (high parallelism)
+
+    Returns:
+        Optimal pool size for current system
+    """
+    import os
+    from datetime import datetime
+
+    cpu_count = os.cpu_count() or 4  # Default to 4 if detection fails
+
+    if cpu_count <= 4:
+        pool_size = 2
+    elif cpu_count <= 8:
+        pool_size = 3
+    elif cpu_count <= 16:
+        pool_size = 5
+    else:
+        pool_size = 8
+
+    print(f"[{datetime.now()}] 💻 System: Detected {cpu_count} CPU cores → MCP pool size = {pool_size}")
+    return pool_size
+
+def _cleanup_all_mcp_clients():
+    """Cleanup all MCP clients, pools, and their Node.js subprocesses when process exits"""
+    global _mcp_clients, _mcp_client_pools
+    from datetime import datetime
+    import subprocess
+    import sys
+
+    # Clear the pools
+    _mcp_client_pools.clear()
+
+    if _mcp_clients:
+        print(f"\n[{datetime.now()}] 🧹 Cleaning up {len(_mcp_clients)} MCP client(s)...")
+
+        for idx, client in enumerate(_mcp_clients):
+            try:
+                print(f"[{datetime.now()}] 🧹 Cleaning up MCP client {idx + 1}/{len(_mcp_clients)}...")
+
+                # Try to access the underlying MCP server processes
+                if hasattr(client, '_clients'):
+                    # MultiServerMCPClient has _clients dict
+                    for server_name, server_client in client._clients.items():
+                        print(f"[{datetime.now()}]    📡 Server: {server_name}")
+                        # Try to terminate the subprocess if it exists
+                        if hasattr(server_client, '_process') and server_client._process:
+                            try:
+                                server_client._process.terminate()
+                                print(f"[{datetime.now()}]    ✓ Terminated subprocess for {server_name}")
+                            except:
+                                pass
+
+                # Try standard close methods
+                if hasattr(client, 'close'):
+                    client.close()
+                    print(f"[{datetime.now()}]    ✓ Called close() on client")
+                elif hasattr(client, 'cleanup'):
+                    client.cleanup()
+                    print(f"[{datetime.now()}]    ✓ Called cleanup() on client")
+
+            except Exception as e:
+                print(f"[{datetime.now()}] ⚠️ Error cleaning up MCP client {idx + 1}: {e}")
+
+        _mcp_clients.clear()
+
+        # Additional: Kill any remaining Node.js MCP processes
+        try:
+            if sys.platform == "win32":
+                # Windows: Find and kill node.exe processes running MCP server
+                result = subprocess.run(
+                    'wmic process where "name=\'node.exe\' AND CommandLine LIKE \'%modelcontextprotocol%\'" get ProcessId /format:csv',
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.stdout:
+                    lines = result.stdout.strip().split('\n')[1:]  # Skip header
+                    killed_count = 0
+                    for line in lines:
+                        if line.strip():
+                            parts = line.split(',')
+                            if len(parts) >= 2:
+                                pid = parts[-1].strip()
+                                try:
+                                    subprocess.run(f'taskkill /PID {pid} /F', shell=True,
+                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    killed_count += 1
+                                except:
+                                    pass
+                    if killed_count > 0:
+                        print(f"[{datetime.now()}] 🧹 Killed {killed_count} orphan Node.js MCP process(es)")
+            else:
+                # Unix/Linux/Mac: Find and kill node processes
+                subprocess.run(
+                    "pkill -f 'node.*modelcontextprotocol'",
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        except Exception as e:
+            print(f"[{datetime.now()}] ⚠️ Error during orphan process cleanup: {e}")
+
+        print(f"[{datetime.now()}] ✅ MCP cleanup completed")
+
+def _register_cleanup_handlers():
+    """Register cleanup handlers for process exit"""
+    global _cleanup_registered
+
+    if _cleanup_registered:
+        return
+
+    import atexit
+    import signal
+
+    # Register atexit handler for normal exit
+    atexit.register(_cleanup_all_mcp_clients)
+
+    # Register signal handlers for forced termination
+    def signal_handler(signum, frame):
+        from datetime import datetime
+        print(f"\n[{datetime.now()}] 🛑 Received signal {signum}, cleaning up...")
+        _cleanup_all_mcp_clients()
+        import sys
+        sys.exit(0)
+
+    # Handle common termination signals
+    try:
+        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # kill command
+    except (AttributeError, ValueError):
+        # Some signals may not be available on all platforms
+        pass
+
+    _cleanup_registered = True
+
 async def load_mcp_tools(
     config: RunnableConfig,
     existing_tool_names: set[str],
 ) -> list[BaseTool]:
     """Load and configure MCP (Model Context Protocol) tools with authentication.
-    
+
     Args:
         config: Runtime configuration containing MCP server details
         existing_tool_names: Set of tool names already in use to avoid conflicts
-        
+
     Returns:
         List of configured MCP tools ready for use
     """
+    global _mcp_clients
+
+    # Register cleanup handlers on first call
+    _register_cleanup_handlers()
+
     configurable = Configuration.from_runnable_config(config)
     
     # Step 1: Handle authentication if required
@@ -583,12 +926,50 @@ async def load_mcp_tools(
         }
     # TODO: When Multi-MCP Server support is merged in OAP, update this code
     
-    # Step 4: Load tools from MCP server
+    # Step 4: Load tools from MCP server using resource pool
     try:
-        client = MultiServerMCPClient(mcp_server_config)
-        available_mcp_tools = await client.get_tools()
-    except Exception:
+        import asyncio
+        import time
+        import json
+        import hashlib
+        from datetime import datetime
+
+        # Create a cache key based on MCP server config
+        config_json = json.dumps(mcp_server_config, sort_keys=True)
+        cache_key = hashlib.md5(config_json.encode()).hexdigest()
+
+        print(f"[{datetime.now()}] 🔌 MCP: Starting MCP pool access (cache_key: {cache_key[:8]}...)")
+        start_time = time.time()
+
+        # Get or create a resource pool for this configuration
+        global _mcp_client_pools
+        if cache_key not in _mcp_client_pools:
+            pool_size = _calculate_mcp_pool_size()
+            _mcp_client_pools[cache_key] = MCPClientPool(mcp_server_config, pool_size)
+            print(f"[{datetime.now()}] 🏊 MCP: Created new pool for cache_key {cache_key[:8]} (total pools: {len(_mcp_client_pools)})")
+
+        pool = _mcp_client_pools[cache_key]
+
+        # Get cached tools from pool (initialized once, reused by all researchers)
+        # This avoids stdio contention when multiple researchers request tools simultaneously
+        available_mcp_tools = await pool.get_cached_tools()
+
+        # Attach pool reference to each tool for later acquire/release during tool calls
+        for tool in available_mcp_tools:
+            tool._mcp_pool = pool
+
+    except asyncio.TimeoutError:
+        print(f"[{datetime.now()}] ⚠️  MCP: Pool access timed out")
+        warnings.warn(
+            f"MCP pool access timed out - skipping MCP tools"
+        )
+        return []
+    except Exception as e:
         # If MCP server connection fails, return empty list
+        print(f"[{datetime.now()}] ❌ MCP: Connection failed: {str(e)}")
+        warnings.warn(
+            f"MCP server connection failed: {str(e)} - skipping MCP tools"
+        )
         return []
     
     # Step 5: Filter and configure tools

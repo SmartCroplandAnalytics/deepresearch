@@ -298,10 +298,12 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
     
     if conduct_research_calls:
         try:
+            from datetime import datetime
             # Limit concurrent research units to prevent resource exhaustion
             allowed_conduct_research_calls = conduct_research_calls[:configurable.max_concurrent_research_units]
             overflow_conduct_research_calls = conduct_research_calls[configurable.max_concurrent_research_units:]
-            
+
+            print(f"[{datetime.now()}] 📋 Supervisor: Delegating {len(allowed_conduct_research_calls)} research tasks...")
             # Execute research tasks in parallel
             research_tasks = [
                 researcher_subgraph.ainvoke({
@@ -309,11 +311,13 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
                         HumanMessage(content=tool_call["args"]["research_topic"])
                     ],
                     "research_topic": tool_call["args"]["research_topic"]
-                }, config) 
+                }, config)
                 for tool_call in allowed_conduct_research_calls
             ]
-            
+
+            print(f"[{datetime.now()}] 📋 Supervisor: Waiting for researcher tasks to complete...")
             tool_results = await asyncio.gather(*research_tasks)
+            print(f"[{datetime.now()}] 📋 Supervisor: All {len(tool_results)} researcher tasks completed")
             
             # Create tool messages with research results
             for observation, tool_call in zip(tool_results, allowed_conduct_research_calls):
@@ -375,24 +379,32 @@ supervisor_subgraph = supervisor_builder.compile()
 
 async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[Literal["researcher_tools"]]:
     """Individual researcher that conducts focused research on specific topics.
-    
+
     This researcher is given a specific research topic by the supervisor and uses
     available tools (search, think_tool, MCP tools) to gather comprehensive information.
     It can use think_tool for strategic planning between searches.
-    
+
     Args:
         state: Current researcher state with messages and topic context
         config: Runtime configuration with model settings and tool availability
-        
+
     Returns:
         Command to proceed to researcher_tools for tool execution
     """
     # Step 1: Load configuration and validate tool availability
+    import time
+    from datetime import datetime
+
+    print(f"[{datetime.now()}] 🔧 Researcher node: Starting tool loading...")
     configurable = Configuration.from_runnable_config(config)
     researcher_messages = state.get("researcher_messages", [])
-    
+
     # Get all available research tools (search, MCP, think_tool)
+    start_time = time.time()
+    print(f"[{datetime.now()}] 🔧 Researcher node: Calling get_all_tools...")
     tools = await get_all_tools(config)
+    print(f"[{datetime.now()}] 🔧 Researcher node: get_all_tools completed in {time.time() - start_time:.2f}s, got {len(tools)} tools")
+
     if len(tools) == 0:
         raise ValueError(
             "No tools found to conduct research: Please configure either your "
@@ -400,34 +412,39 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
         )
     
     # Step 2: Configure the researcher model with tools
+    print(f"[{datetime.now()}] 🔧 Researcher node: Configuring model...")
     research_model_config = {
         "model": configurable.research_model,
         "max_tokens": configurable.research_model_max_tokens,
         "api_key": get_api_key_for_model(configurable.research_model, config),
         "tags": ["langsmith:nostream"]
     }
-    
+
     # Prepare system prompt with MCP context if available
     researcher_prompt = research_system_prompt.format(
-        mcp_prompt=configurable.mcp_prompt or "", 
+        mcp_prompt=configurable.mcp_prompt or "",
         date=get_today_str()
     )
-    
+
     # Configure model with tools, retry logic, and settings
+    print(f"[{datetime.now()}] 🔧 Researcher node: Creating base model...")
     base_researcher_model = get_configured_chat_model(
         configurable.research_model,
         configurable.research_model_max_tokens,
         get_api_key_for_model(configurable.research_model, config)
     )
+    print(f"[{datetime.now()}] 🔧 Researcher node: Binding {len(tools)} tools to model...")
     research_model = (
         base_researcher_model
         .bind_tools(tools)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
-    
+    print(f"[{datetime.now()}] 🔧 Researcher node: Model configured, invoking with messages...")
+
     # Step 3: Generate researcher response with system context
     messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
     response = await research_model.ainvoke(messages)
+    print(f"[{datetime.now()}] 🔧 Researcher node: Model invocation completed")
     
     # Step 4: Update state and proceed to tool execution
     return Command(
@@ -661,14 +678,20 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             )
             
             # Generate the final report using properly configured model
+            from datetime import datetime
+            print(f"[{datetime.now()}] 📝 Final Report: Configured max_tokens = {configurable.final_report_model_max_tokens}")
+
             final_report_model = get_configured_chat_model(
                 configurable.final_report_model,
                 configurable.final_report_model_max_tokens,
                 get_api_key_for_model(configurable.final_report_model, config)
             )
+
+            print(f"[{datetime.now()}] 📝 Final Report: Calling model {configurable.final_report_model}...")
             final_report = await final_report_model.ainvoke([
                 HumanMessage(content=final_report_prompt)
             ])
+            print(f"[{datetime.now()}] 📝 Final Report: Generated {len(final_report.content)} characters")
             
             # Return successful report generation
             return {

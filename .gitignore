@@ -59,6 +59,9 @@ logs/
 # Dependencies
 node_modules/
 
+# MCP runtime (local MCP server installation)
+mcp_runtime/
+
 # LangGraph specific
 .langgraph/
 
