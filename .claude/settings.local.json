@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
-      "Bash(npx @modelcontextprotocol/server-filesystem:*)"
+      "Bash(npx @modelcontextprotocol/server-filesystem:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []
