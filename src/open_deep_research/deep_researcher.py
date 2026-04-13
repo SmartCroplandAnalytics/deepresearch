@@ -637,14 +637,14 @@ researcher_subgraph = researcher_builder.compile()
 
 async def final_report_generation(state: AgentState, config: RunnableConfig):
     """Generate the final comprehensive research report with retry logic for token limits.
-    
-    This function takes all collected research findings and synthesizes them into a 
+
+    This function takes all collected research findings and synthesizes them into a
     well-structured, comprehensive final report using the configured report generation model.
-    
+
     Args:
         state: Agent state containing research findings and context
         config: Runtime configuration with model settings and API keys
-        
+
     Returns:
         Dictionary containing the final report and cleared state
     """
@@ -652,13 +652,29 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
     notes = state.get("notes", [])
     cleared_state = {"notes": {"type": "override", "value": []}}
     findings = "\n".join(notes)
-    
+
     # Step 2: Configure the final report generation model
     configurable = Configuration.from_runnable_config(config)
+
+    # Auto-switch to deepseek-reasoner if research model is deepseek-chat
+    final_report_model = configurable.final_report_model
+    research_model_lower = configurable.research_model.lower()
+
+    # Check if research model is deepseek-chat (handle various formats)
+    if "deepseek-chat" in research_model_lower or "deepseek:chat" in research_model_lower:
+        # Auto-switch to reasoner model for final report generation
+        if research_model_lower.startswith("deepseek:"):
+            final_report_model = "deepseek:reasoner"
+        else:
+            final_report_model = "deepseek-reasoner"
+
+        from datetime import datetime
+        print(f"[{datetime.now()}] 🔄 Auto-switching: Detected deepseek-chat as research model, using {final_report_model} for final report")
+
     writer_model_config = {
-        "model": configurable.final_report_model,
+        "model": final_report_model,
         "max_tokens": configurable.final_report_model_max_tokens,
-        "api_key": get_api_key_for_model(configurable.final_report_model, config),
+        "api_key": get_api_key_for_model(final_report_model, config),
         "tags": ["langsmith:nostream"]
     }
     
@@ -681,14 +697,14 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             from datetime import datetime
             print(f"[{datetime.now()}] 📝 Final Report: Configured max_tokens = {configurable.final_report_model_max_tokens}")
 
-            final_report_model = get_configured_chat_model(
-                configurable.final_report_model,
+            final_report_chat_model = get_configured_chat_model(
+                final_report_model,
                 configurable.final_report_model_max_tokens,
-                get_api_key_for_model(configurable.final_report_model, config)
+                get_api_key_for_model(final_report_model, config)
             )
 
-            print(f"[{datetime.now()}] 📝 Final Report: Calling model {configurable.final_report_model}...")
-            final_report = await final_report_model.ainvoke([
+            print(f"[{datetime.now()}] 📝 Final Report: Calling model {final_report_model}...")
+            final_report = await final_report_chat_model.ainvoke([
                 HumanMessage(content=final_report_prompt)
             ])
             print(f"[{datetime.now()}] 📝 Final Report: Generated {len(final_report.content)} characters")
@@ -702,12 +718,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
             
         except Exception as e:
             # Handle token limit exceeded errors with progressive truncation
-            if is_token_limit_exceeded(e, configurable.final_report_model):
+            if is_token_limit_exceeded(e, final_report_model):
                 current_retry += 1
-                
+
                 if current_retry == 1:
                     # First retry: determine initial truncation limit
-                    model_token_limit = get_model_token_limit(configurable.final_report_model)
+                    model_token_limit = get_model_token_limit(final_report_model)
                     if not model_token_limit:
                         return {
                             "final_report": f"Error generating final report: Token limit exceeded, however, we could not determine the model's maximum context length. Please update the model map in deep_researcher/utils.py with this information. {e}",
