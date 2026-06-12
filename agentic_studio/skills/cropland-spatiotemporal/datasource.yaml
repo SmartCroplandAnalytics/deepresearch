@@ -1,0 +1,14 @@
+# 数据源声明 —— 本 plugin 的领域数据绑定（被 infra/data/providers.py 消费）。
+# 安全模型：agent 不写 SQL、不见 DSN；取数经 MetricStore 安全中介（只读 + 白名单 + 参数化）。
+kind: metric_postgres
+dsn_env: CROPLAND_DSN                      # DSN 经环境变量注入，不进仓库
+source_name: smart_cropland_analytics
+views:
+  raw: vw_region_time_indicator_raw        # 列：region_name, year, indicator_code, indicator_name, value, unit
+  derived: vw_region_time_indicator_derived
+meta_tables:
+  raw: raw_indicator_meta                  # 指标白名单（code, name, unit）
+  derived: derived_indicator_meta
+region_table: region                       # 地区维表（name, level, parent_id）= 地区白名单
+time_table: time_dimension
+default_region: 四川省                      # 缺省地区；省级证据 id 不带后缀

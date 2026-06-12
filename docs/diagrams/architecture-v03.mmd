@@ -1,0 +1,47 @@
+flowchart TB
+    %% agentic-studio v0.3
+    User["User / CLI / API"] --> Entry["Command or Chat Entry"]
+
+    Entry --> Registry["Workflow Registry"]
+    Registry --> Manifest["WorkflowManifest\nserializable contract"]
+    Registry --> RuntimeSpec["RuntimeWorkflowSpec\nPython wiring"]
+
+    Manifest --> Task["TaskSpec\nworkflow_id + inputs"]
+    Task --> Workspace["Mirage Workspace\nfiles are state"]
+    Workspace --> Checkpoint["Checkpoint / Resume"]
+
+    RuntimeSpec --> Runner["WorkflowRunner\nthin dispatcher"]
+    Runner --> Closed["Closed Loop\nDeepAgents + Skill"]
+    Runner --> Hybrid["Hybrid\nsmall graph + loop nodes"]
+    Runner --> Graph["Graph Controlled\nworkflow-owned LangGraph"]
+
+    Closed --> Session["SessionEngine Protocol"]
+    Hybrid --> Session
+    Graph --> Session
+    Session --> DeepAgents["DeepAgents runtime"]
+
+    DeepAgents --> Skills["Skills\nworkflow / atomic / knowledge"]
+    DeepAgents --> Tools["Tools\nsearch / db / doc / web / fs"]
+    DeepAgents --> Validators["Validators\nhard gates + soft checks"]
+    DeepAgents --> Workspace
+
+    Tools --> Mirage["Mirage VFS"]
+    Tools --> Docling["Docling adapter\nconvert / read / edit / export"]
+    Tools --> DB["Postgres via Mirage\nschema view + run_sql"]
+    Tools --> Web["Web search"]
+
+    RuntimeSpec --> DocWorkflows["Built-in document workflows"]
+    DocWorkflows --> Gen["gen-document\nwrite / fill / DeepResearch"]
+    DocWorkflows --> Edit["edit-document\nmodify"]
+
+    classDef entry fill:#f8fafc,stroke:#475569,stroke-width:1px,color:#0f172a;
+    classDef platform fill:#e0f2fe,stroke:#0284c7,stroke-width:1px,color:#082f49;
+    classDef runtime fill:#dcfce7,stroke:#16a34a,stroke-width:1px,color:#052e16;
+    classDef workflow fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#451a03;
+    classDef tool fill:#fae8ff,stroke:#a855f7,stroke-width:1px,color:#3b0764;
+
+    class User,Entry entry;
+    class Registry,Manifest,Task,Workspace,Checkpoint platform;
+    class RuntimeSpec,Runner,Closed,Hybrid,Graph,Session,DeepAgents runtime;
+    class DocWorkflows,Gen,Edit workflow;
+    class Skills,Tools,Validators,Mirage,Docling,DB,Web tool;

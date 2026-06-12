@@ -1,73 +1,114 @@
-
-*.egg-info
-*.pyc
-
-# Python
+# ─── Python ────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+*.egg-info/
+*.egg
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
+sdist/
+wheels/
+.installed.cfg
+develop-eggs/
 .eggs/
+parts/
+var/
+downloads/
 lib/
 lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual environments
+# ─── uv / venv ─────────────────────────────────────────────────────
+.venv/
 venv/
 env/
 ENV/
-.env
 
-# IDE specific files
+# ─── 测试 / 类型检查 / lint ────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# ─── Jupyter ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── 环境变量与密钥 ─────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── IDE / 编辑器 ───────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
+*.swn
 .DS_Store
+Thumbs.db
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# ─── LangChain / 模型缓存 ───────────────────────────────────────────
+.langchain.db
+.langsmith/
 
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
+# ─── Mirage / 工作区临时产出 ────────────────────────────────────────
+# 用户实际跑出来的 workspace（带本地敏感数据）
+/workspaces/
+/workspace_*/
 
-# Logs
+# Mirage workspace 快照（用户文件）
+*.workspace.tar
+*.workspace.tar.gz
+
+# 索引缓存
+.index/
+.cache/
+
+# ─── 日志 ──────────────────────────────────────────────────────────
 *.log
 logs/
 
-# Local development
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Dependencies
-node_modules/
-
-# MCP runtime (local MCP server installation)
-mcp_runtime/
-
-# LangGraph specific
-.langgraph/
-
-# Temporary files
+# ─── 临时文件 ──────────────────────────────────────────────────────
 tmp/
 temp/
+*.tmp
+*.bak
 
-.langgraph_api
-/test
+# ─── 文档输出（保留源文件，忽略导出产物）─────────────────────────────
+*.docx
+*.pdf
+*.pptx
+*.xlsx
+# 注意：如有需要 commit 的样例文档，单独 `git add -f` 强制添加
+
+# ─── 测试 fixtures 与样例（按需调整）────────────────────────────────
+/test_workspaces/
+/example_runs/
+
+# ─── 系统 ──────────────────────────────────────────────────────────
+*~
+.directory
+
+# agentic-studio runtime
+.workspaces/
+.env
+
+# ─── codegraph 索引（本地分析缓存，含 sqlite db）──────────────────────
+.codegraph/
+
+# ─── 根目录一次性冒烟脚本 ──────────────────────────────────────────
+/_smoke_embed.py
+
+# ─── main 分支（open_deep_research）遗留的本地目录，engineering 分支不跟踪 ───
+/mcp_runtime/
+/MD/
+/uploads/
+/test_docs/
+/test/
+/.langgraph_api/

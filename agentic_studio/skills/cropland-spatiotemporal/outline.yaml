@@ -1,0 +1,186 @@
+# 耕地时空演变简报 —— 大纲模板 + 指标绑定 + scope schema（从参考简报抽象而来）
+#
+# 这是 grounded-write 的「领域 plugin」核心：把简报结构 + 每节所需数据（DB 指标）+
+# 本任务的范围维度（scope）声明在一起。能力层（grounded_brief）只做 schema 校验与绑定，
+# **不预设任何维度**——年份/地区是本领域的事，别的 plugin 可以是完全不同的维度。
+#
+# evidence 规格：kind 由 datasource 的 provider 提供（series / by_region）；
+#   值写 "$参数名" = 绑定 scope（列表值按 provider 的 fanout 键展开，如多地区对比）；
+#   when: "$参数名" = 该条规格由 scope 开关门控。
+# 指标 code 全部来自库内 meta 白名单（MetricStore 校验 + 载入时 lint），agent 不写 SQL。
+#
+# figures/tables：每节声明的**确定性图表**（kind 由 datasource 的 renderer 提供：
+#   line_chart / bar_chart / series_table / by_region_table）。数据直出、不经 LLM——
+#   图表数字构造即有据；编号在装配时全文统一（图1/表1…）。图需要 viz extra（matplotlib）。
+
+title: 耕地时空演变简报
+language: 中文
+
+scope:
+  label: "$regions（$years年）"
+  params:
+    regions:
+      type: list_str
+      default: ["四川省"]
+      check: region
+      desc: 一个或多个地区（省/市州，可多选对比，如 ["成都市","绵阳市"]）
+    years:
+      type: year_range
+      default: null
+      desc: 年份区间 [起, 止]；缺省 = 数据全部年份
+    breakdown:
+      type: bool
+      default: true
+      desc: 是否按下级行政区（市州）做分区下钻对比
+
+sections:
+  - id: "1"
+    title: 耕地数量变化
+    children:
+      - id: "1.1"
+        title: 耕地总体变化
+        key_question: 该地区耕地总面积历年如何增减变化？
+        target_words: 220
+        evidence:
+          - {kind: series, code: FARMLAND_AREA, region: $regions, years: $years}
+          - {kind: series, code: FARMLAND_AREA_CHANGE, region: $regions, years: $years}
+        figures:
+          - {kind: line_chart, code: FARMLAND_AREA, region: $regions, years: $years, caption: 耕地总面积历年变化}
+        tables:
+          - {kind: series_table, codes: [FARMLAND_AREA, FARMLAND_AREA_CHANGE], region: $regions, years: $years, caption: 耕地面积与年度净变化历年}
+      - id: "1.2"
+        title: 耕地二级类变化
+        key_question: 水田、水浇地、旱地三类历年各自如何变化？
+        target_words: 260
+        evidence:
+          - {kind: series, code: PADDY_FIELD_AREA, region: $regions, years: $years}
+          - {kind: series, code: IRRIGATED_LAND_AREA, region: $regions, years: $years}
+          - {kind: series, code: DRY_LAND_AREA, region: $regions, years: $years}
+        figures:
+          - {kind: line_chart, codes: [PADDY_FIELD_AREA, IRRIGATED_LAND_AREA, DRY_LAND_AREA], region: $regions, years: $years, caption: 耕地二级类面积历年变化}
+        tables:
+          - {kind: series_table, codes: [PADDY_FIELD_AREA, IRRIGATED_LAND_AREA, DRY_LAND_AREA], region: $regions, years: $years, caption: 耕地二级类面积历年}
+      - id: "1.3"
+        title: 分区耕地情况
+        key_question: 下级各区域耕地面积分布与净增减格局如何？
+        target_words: 240
+        optional: true   # 分区下钻：scope 关掉 breakdown 或该地区无下级数据时整节跳过（不算缺口）
+        evidence:
+          - {kind: by_region, code: FARMLAND_AREA, year: 2024, parent: $regions, years: $years, when: $breakdown}
+          - {kind: by_region, code: FARMLAND_AREA, year: 2019, parent: $regions, years: $years, when: $breakdown}
+        figures:
+          - {kind: bar_chart, code: FARMLAND_AREA, parent: $regions, years: $years, top: 21, when: $breakdown, caption: 各市（州）耕地面积对比}
+        tables:
+          - {kind: by_region_table, code: FARMLAND_AREA, parent: $regions, years: $years, top: 21, when: $breakdown, caption: 各市（州）耕地面积及变化}
+
+  - id: "2"
+    title: 人均耕地变化
+    children:
+      - id: "2.1"
+        title: 人均耕地总体变化
+        key_question: 该地区人均耕地（耕地面积/常住人口）历年如何变化？
+        target_words: 180
+        data_gap: 需常住人口数据（库内暂无人口指标）；人均耕地=耕地面积÷常住人口
+        evidence: []
+
+  - id: "3"
+    title: 耕地结构变化
+    children:
+      - id: "3.1"
+        title: 耕地总体流向情况
+        key_question: 耕地与其他地类间的流入/流出格局如何？
+        target_words: 280
+        evidence:
+          - {kind: series, code: INFLOW_FROM_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_FOREST, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_GRASSLAND, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_CONSTRUCTION, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_FOREST, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_GRASSLAND, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_CONSTRUCTION, region: $regions, years: $years}
+        tables:
+          - {kind: series_table, codes: [INFLOW_FROM_GARDEN, INFLOW_FROM_FOREST, INFLOW_FROM_GRASSLAND, INFLOW_FROM_CONSTRUCTION], region: $regions, years: $years, caption: 各地类流入耕地面积历年}
+          - {kind: series_table, codes: [OUTFLOW_TO_GARDEN, OUTFLOW_TO_FOREST, OUTFLOW_TO_GRASSLAND, OUTFLOW_TO_CONSTRUCTION], region: $regions, years: $years, caption: 耕地流出至各地类面积历年}
+
+  - id: "4"
+    title: 耕地空间格局变化
+    children:
+      - id: "4.1"
+        title: 耕地破碎度变化
+        key_question: 该地区耕地破碎度历年如何变化？
+        target_words: 160
+        evidence:
+          - {kind: series, code: FARMLAND_FRAGMENTATION, region: $regions, years: $years}
+          - {kind: series, code: FARMLAND_FRAGMENTATION_CHANGE, region: $regions, years: $years}
+        figures:
+          - {kind: line_chart, code: FARMLAND_FRAGMENTATION, region: $regions, years: $years, caption: 耕地破碎度历年变化}
+      - id: "4.2"
+        title: 耕地坡度变化
+        key_question: 各坡度等级（≤2°/2-6°/6-15°/15-25°/>25°）耕地面积如何变化？
+        target_words: 240
+        evidence:
+          - {kind: series, code: SLOPE_0_2_AREA, region: $regions, years: $years}
+          - {kind: series, code: SLOPE_2_6_AREA, region: $regions, years: $years}
+          - {kind: series, code: SLOPE_6_15_AREA, region: $regions, years: $years}
+          - {kind: series, code: SLOPE_15_25_AREA, region: $regions, years: $years}
+          - {kind: series, code: SLOPE_25_PLUS_AREA, region: $regions, years: $years}
+        figures:
+          - {kind: line_chart, codes: [SLOPE_0_2_AREA, SLOPE_2_6_AREA, SLOPE_6_15_AREA, SLOPE_15_25_AREA, SLOPE_25_PLUS_AREA], region: $regions, years: $years, caption: 各坡度等级耕地面积历年变化}
+        tables:
+          - {kind: series_table, codes: [SLOPE_0_2_AREA, SLOPE_2_6_AREA, SLOPE_6_15_AREA, SLOPE_15_25_AREA, SLOPE_25_PLUS_AREA], region: $regions, years: $years, caption: 各坡度等级耕地面积历年}
+
+  - id: "5"
+    title: 耕地生态格局变化
+    children:
+      - id: "5.1"
+        title: 耕地与种植园地、林地间的相互变化
+        key_question: 耕地与园地、林地之间的双向转换规模如何？
+        target_words: 200
+        evidence:
+          - {kind: series, code: OUTFLOW_TO_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_FOREST, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_FOREST, region: $regions, years: $years}
+      - id: "5.2"
+        title: 稳定与不稳定耕地变化
+        key_question: 稳定耕地、不稳定耕地面积历年如何变化？
+        target_words: 180
+        evidence:
+          - {kind: series, code: STABLE_FARMLAND_AREA, region: $regions, years: $years}
+          - {kind: series, code: UNSTABLE_FARMLAND_AREA, region: $regions, years: $years}
+        figures:
+          - {kind: line_chart, codes: [STABLE_FARMLAND_AREA, UNSTABLE_FARMLAND_AREA], region: $regions, years: $years, caption: 稳定与不稳定耕地面积历年变化}
+
+  - id: "6"
+    title: 耕地变化原因分析
+    children:
+      - id: "6.1"
+        title: 退耕还林与绿化造林
+        key_question: 耕地流向林地/草地的规模反映的生态退耕影响？
+        target_words: 150
+        evidence:
+          - {kind: series, code: OUTFLOW_TO_FOREST, region: $regions, years: $years}
+          - {kind: series, code: OUTFLOW_TO_GRASSLAND, region: $regions, years: $years}
+      - id: "6.2"
+        title: 农业产业结构调整
+        key_question: 耕地与园地间的转换反映的种植结构调整？
+        target_words: 150
+        evidence:
+          - {kind: series, code: OUTFLOW_TO_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_GARDEN, region: $regions, years: $years}
+      - id: "6.3"
+        title: 建设占用
+        key_question: 耕地流向建设用地的规模？
+        target_words: 130
+        evidence:
+          - {kind: series, code: OUTFLOW_TO_CONSTRUCTION, region: $regions, years: $years}
+      - id: "6.4"
+        title: 耕地保护政策成效
+        key_question: 各地类流入耕地（恢复补充）反映的耕地保护政策成效？
+        target_words: 170
+        evidence:
+          - {kind: series, code: INFLOW_FROM_GARDEN, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_FOREST, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_GRASSLAND, region: $regions, years: $years}
+          - {kind: series, code: INFLOW_FROM_CONSTRUCTION, region: $regions, years: $years}

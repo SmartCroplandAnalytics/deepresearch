@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
-      "Bash(npx @modelcontextprotocol/server-filesystem:*)"
+      "Bash(npx @modelcontextprotocol/server-filesystem:*)",
+      "PowerShell(codegraph *)",
+      "PowerShell(Get-ChildItem E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\geo, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\deploy, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\scripts, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\documents | Select-Object @{n='Dir';e={$_.Directory.Name + $_.Parent.Name}}, Name | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\deepresearch\\\\MD, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\deepresearch\\\\test_docs, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\deepresearch\\\\uploads -ErrorAction SilentlyContinue | Select-Object @{n='Parent';e={$_.Parent.Name}}, Name, Length | Format-Table -AutoSize; Get-ChildItem E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\backend, E:\\\\WorkSpace\\\\SmartCroplandAnalytics\\\\frontend | Select-Object @{n='Parent';e={$_.Parent.Name}}, Name | Format-Table -AutoSize)"
     ],
     "deny": [],
     "ask": []
