@@ -17,14 +17,17 @@ _META = ".session.json"
 def write_session_meta(
     workspace_root: str, session_id: str, *, title: str = "", plugin: str = ""
 ) -> None:
-    """在 workspace 根写会话元信息（已存在则保留原 created）。"""
+    """在 workspace 根写会话元信息（已存在则保留原 created；空 title 不冲掉已有标题）。"""
     p = Path(workspace_root)
     p.mkdir(parents=True, exist_ok=True)
     f = p / _META
     created = ""
     if f.exists():
         try:
-            created = json.loads(f.read_text(encoding="utf-8")).get("created", "")
+            old = json.loads(f.read_text(encoding="utf-8"))
+            created = old.get("created", "")
+            # 重建会话（续跑）时调用方通常不带 title——保留用户已有标题
+            title = title or old.get("title", "")
         except Exception:  # noqa: BLE001
             pass
     f.write_text(json.dumps({

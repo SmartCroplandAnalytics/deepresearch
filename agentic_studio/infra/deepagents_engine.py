@@ -123,6 +123,22 @@ class DeepAgentsSession:
     def session_id(self) -> str:
         return self._sid
 
+    def history(self) -> list[dict[str, str]]:
+        """本线程的可见对话历史（持久 checkpointer 续跑后供 UI 恢复展示）。
+
+        只取 human/ai 的可见文本（[{role: user|assistant, content}]）；
+        纯工具调用的 AI 消息与 tool 消息跳过。经编译图的公开 get_state 读，
+        不解析 checkpoint 存储格式（channel 值在 writes 表，直读会拿到空值）。
+        """
+        snap = self._agent.get_state(self._config)
+        out: list[dict[str, str]] = []
+        for m in (snap.values or {}).get("messages") or []:
+            role = {"human": "user", "ai": "assistant"}.get(getattr(m, "type", ""))
+            text = _text_of(getattr(m, "content", ""))
+            if role and text.strip():
+                out.append({"role": role, "content": text})
+        return out
+
     def prompt(self, message: str) -> Iterator[SessionEvent]:
         yield SessionEvent(type="turn_start")
         agent_input = {"messages": [{"role": "user", "content": message}]}
