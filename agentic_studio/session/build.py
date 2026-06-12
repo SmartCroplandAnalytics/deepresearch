@@ -68,11 +68,14 @@ def build_chat_session(
     capabilities: Sequence[str] = ("grounded-writing",),
     corpus_dir: str | None = None,
     session_id: str = "chat",
+    system_prompt: str | None = None,
 ) -> SessionEngine:
     """通用 runtime 对话会话（统一 workspace），**不绑死任何 plugin**（工程规范 §13）。
 
     - 薄系统提示（prompts/runtime_sys.md：VFS 约定、`/能力 @plugin` 消息约定、诚实底线）；
       能力 policy 经 /skills 的 SKILL.md 按需拉起；能力工具按 capabilities 列表注入。
+    - system_prompt 可覆盖默认 runtime 提示：场景化产品层（如固定单一 plugin 的对话服务）
+      在调用侧拼自己的提示词；runtime 本身仍不绑定领域。
     - /skills、/corpus 由引擎强制只读挂载；**allow_exec=False**（写作会话不给命令执行，
       防经子进程读 env/DSN 绕过安全中介）。
     - 持久线程态 SqliteSaver 落 workspace/.thread.sqlite；closers **传引用**（能力工具
@@ -98,7 +101,7 @@ def build_chat_session(
         workspace_root=workspace_root,
         model=model,
         tools=tools,
-        system_prompt=prompts.load("runtime_sys"),
+        system_prompt=system_prompt or prompts.load("runtime_sys"),
         skills_mounts=mounts,
         checkpointer=make_sqlite_checkpointer(workspace_root),
         allow_exec=False,
