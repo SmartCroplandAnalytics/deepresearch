@@ -31,7 +31,9 @@ pg = [
     "psycopg[binary]",    # MetricStore 安全中介取数层（同步只读连接）
 ]
 doc = ["docling"]
-viz = ["matplotlib>=3.8", "seaborn>=0.13"]  # 简报图表（PNG 确定性渲染、不经 LLM；seaborn 主题/配色）
+viz = [
+    "plotly>=5.20",
+]  # 简报/对话图表：确定性产出 Plotly figure JSON（前端交互式渲染、PNG 客户端导出，不经 LLM）
 embed = ["sentence-transformers>=3.0", "torch", "numpy>=1.26"]  # bge-m3 跨语言语义检索（§9）；torch 直列以便走 cu128 源
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 

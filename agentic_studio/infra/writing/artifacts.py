@@ -1,31 +1,40 @@
 """确定性图/表渲染（能力级、领域无关）——**图表不经 LLM**。
 
-表 = markdown 直出；图 = matplotlib 落 PNG 进 workspace `figures/`。数据由数据源 renderer
-（如 metric_postgres 的 series/by_region）直接查得 → 图表数字**构造即有据**，模型只在行文里
-用「下图/下表」衔接，不画图、不填表、不复述。
+表 = markdown 直出；图 = **Plotly figure JSON** 落进 workspace `figures/*.plotly.json`。数据由
+数据源 renderer（如 metric_postgres 的 series/by_region）直接查得 → 图表数字**构造即有据**，
+模型只在行文里用「下图/下表」衔接，不画图、不填表、不复述。
+
+图为何用 Plotly JSON 而非 PNG：前端用 plotly.js **交互式**渲染（缩放/悬停/图例），PNG 由
+图上工具栏（或导出按钮）**客户端**导出——服务端只产确定性的图谱规格（data+layout），不依赖
+任何渲染后端（无 kaleido/matplotlib）。markdown 里仍用 `![标题](figures/x.plotly.json)` 引用，
+前端按扩展名识别为交互图。中文字体走浏览器，无需服务端字体配置。
 
 编号：渲染时打占位 token `[[图]]`/`[[表]]`（CJK，避开引用正则 `[0-9A-Za-z_]`，不会被
 assemble 的 [id]→[N] 重编号误吃），装配时 `number_artifacts` 按全文出现顺序替换为 图1/表1…。
 
-matplotlib+seaborn 是可选依赖（extra: `viz`）：未装时表照常、图在 plugin lint 期被明确拒绝。
-绘图用 OO API（Figure 直构，无 pyplot 全局态）——节级并行下线程安全；seaborn 只做主题/配色
-（rcParams 级，进程内设一次），不走它的 pyplot 绘图函数。
+plotly 是可选依赖（extra: `viz`）：未装时表照常、图在 plugin lint 期被明确拒绝。
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 FIG_TOKEN = "[[图]]"
 TAB_TOKEN = "[[表]]"
 
-_FONTS = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC", "DejaVu Sans"]
-_styled = False
+# 浏览器端字体级联（plotly.js 用浏览器字体渲染 CJK）。
+_FONT_FAMILY = "Microsoft YaHei, SimHei, Noto Sans CJK SC, PingFang SC, sans-serif"
+# 配色（plotly 离散色板，足够多条线/柱）。
+_COLORS = [
+    "#2E86AB", "#E1812C", "#3A923A", "#C03D3E", "#8463A8",
+    "#946B55", "#D684BD", "#7F7F7F", "#BCBD45", "#39ACC9",
+]
 
 
-def has_matplotlib() -> bool:
+def has_plotly() -> bool:
     try:
-        import matplotlib  # noqa: F401
+        import plotly  # noqa: F401
 
         return True
     except ImportError:
@@ -63,50 +72,24 @@ def number_artifacts(text: str) -> str:
             i = pt + len(TAB_TOKEN)
 
 
-def _apply_style() -> None:
-    """进程内一次：seaborn 主题（whitegrid）+ 中文字体（须在 set_theme 之后盖回）。"""
-    global _styled
-    if _styled:
-        return
-    import matplotlib
-
-    try:
-        import seaborn as sns
-
-        sns.set_theme(style="whitegrid", context="notebook")
-    except ImportError:
-        pass
-    matplotlib.rcParams["font.family"] = "sans-serif"
-    matplotlib.rcParams["font.sans-serif"] = _FONTS
-    matplotlib.rcParams["axes.unicode_minus"] = False
-    _styled = True
+def _base_layout(title: str) -> dict:
+    """统一版式：白底、中文字体级联、紧凑边距、悬停统一。"""
+    return {
+        "title": {"text": title, "x": 0.02, "xanchor": "left",
+                  "font": {"size": 16}},
+        "template": "plotly_white",
+        "font": {"family": _FONT_FAMILY, "size": 12, "color": "#333333"},
+        "margin": {"l": 60, "r": 24, "t": 48, "b": 48},
+        "hovermode": "x unified",
+        "autosize": True,
+    }
 
 
-def _palette(n: int, name: str = "deep") -> list | None:
-    try:
-        import seaborn as sns
-
-        return sns.color_palette(name, n)
-    except ImportError:
-        return None
-
-
-def _new_figure(figsize: tuple[float, float]):
-    _apply_style()
-    from matplotlib.figure import Figure
-
-    return Figure(figsize=figsize, dpi=150)
-
-
-def _finish(fig, ax, path: str | Path, *, title: str) -> None:
-    if title:
-        ax.set_title(title, fontsize=12, fontweight="semibold", pad=10)
-    ax.tick_params(labelsize=8.5)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
+def _write_fig(path: str | Path, fig: dict) -> None:
+    """落 Plotly figure JSON（{data, layout}）到 figures/*.plotly.json。"""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(p, bbox_inches="tight", facecolor="white")
+    p.write_text(json.dumps(fig, ensure_ascii=False), encoding="utf-8")
 
 
 def save_line_chart(
@@ -116,29 +99,33 @@ def save_line_chart(
     ylabel: str = "",
     title: str = "",
 ) -> None:
-    """折线图（时序）。series = [(label, [(x, y), …]), …]；≤3 条线时末点标值。"""
-    fig = _new_figure((7.6, 4.0))
-    ax = fig.subplots()
-    colors = _palette(max(3, len(series)))
+    """折线图（时序）。series = [(label, [(x, y), …]), …] → Plotly figure JSON。"""
+    data = []
     xs_all: set[int] = set()
     for i, (label, pts) in enumerate(series):
         xs = [x for x, _ in pts]
         ys = [v for _, v in pts]
-        ax.plot(xs, ys, marker="o", markersize=4.5, linewidth=2.2, label=label,
-                color=colors[i] if colors else None,
-                markeredgecolor="white", markeredgewidth=0.8)
-        if len(series) <= 3 and pts:
-            ax.annotate(f"{ys[-1]:.2f}", (xs[-1], ys[-1]), textcoords="offset points",
-                        xytext=(6, 5), fontsize=8,
-                        color=colors[i] if colors else "#333333")
         xs_all.update(xs)
-    ax.set_xticks(sorted(xs_all))
+        data.append({
+            "type": "scatter",
+            "mode": "lines+markers" + ("+text" if len(series) <= 3 else ""),
+            "name": label,
+            "x": xs,
+            "y": ys,
+            "line": {"color": _COLORS[i % len(_COLORS)], "width": 2.4},
+            "marker": {"size": 7, "color": _COLORS[i % len(_COLORS)]},
+            "text": [f"{v:.2f}" for v in ys] if len(series) <= 3 else None,
+            "textposition": "top center",
+            "textfont": {"size": 10},
+            "hovertemplate": f"{label}: %{{y:.2f}}<extra></extra>",
+        })
+    layout = _base_layout(title)
+    layout["xaxis"] = {"tickmode": "array", "tickvals": sorted(xs_all),
+                       "dtick": 1}
     if ylabel:
-        ax.set_ylabel(ylabel, fontsize=9.5)
-    if len(series) > 1:
-        ax.legend(fontsize=8.5, frameon=False)
-    ax.margins(x=0.06)
-    _finish(fig, ax, path, title=title)
+        layout["yaxis"] = {"title": {"text": ylabel}}
+    layout["showlegend"] = len(series) > 1
+    _write_fig(path, {"data": data, "layout": layout})
 
 
 def save_bar_chart(
@@ -149,18 +136,24 @@ def save_bar_chart(
     xlabel: str = "",
     title: str = "",
 ) -> None:
-    """横向条形图（分区对比，最大值在上、渐变配色、条端标数值）。"""
-    fig = _new_figure((7.6, max(2.6, 0.32 * len(labels) + 1.3)))
-    ax = fig.subplots()
-    ys = list(range(len(labels)))[::-1]
-    colors = _palette(len(labels), "crest_r") or ["#4C78A8"] * len(labels)
-    ax.barh(ys, values, height=0.66, color=colors, edgecolor="white", linewidth=0.4)
-    ax.set_yticks(ys)
-    ax.set_yticklabels(labels, fontsize=8.5)
-    for y, v in zip(ys, values, strict=True):
-        ax.text(v, y, f" {v:.2f}", va="center", fontsize=7.5, color="#333333")
+    """横向条形图（分区对比，最大值在上、条端标数值）→ Plotly figure JSON。"""
+    # plotly 横向条形：列表顺序自下而上，故反转使最大值（首项）在顶部。
+    labels_r = list(labels)[::-1]
+    values_r = list(values)[::-1]
+    data = [{
+        "type": "bar",
+        "orientation": "h",
+        "x": values_r,
+        "y": labels_r,
+        "marker": {"color": _COLORS[0]},
+        "text": [f"{v:.2f}" for v in values_r],
+        "textposition": "outside",
+        "texttemplate": "%{text}",
+        "hovertemplate": "%{y}: %{x:.2f}<extra></extra>",
+    }]
+    layout = _base_layout(title)
+    layout["margin"]["l"] = 110  # 地区名较长，留宽左边距
+    layout["height"] = max(260, 30 * len(labels) + 120)
     if xlabel:
-        ax.set_xlabel(xlabel, fontsize=9.5)
-    ax.margins(x=0.12)
-    ax.grid(axis="y", visible=False)
-    _finish(fig, ax, path, title=title)
+        layout["xaxis"] = {"title": {"text": xlabel}}
+    _write_fig(path, {"data": data, "layout": layout})

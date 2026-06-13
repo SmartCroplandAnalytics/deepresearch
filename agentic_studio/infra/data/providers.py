@@ -150,7 +150,8 @@ def _lint_codes(store: MetricStore, spec: dict, kind: str) -> str | None:
 
 def _fig_name(sid: str, idx: int, sub: int = -1) -> str:
     base = f"figures/s{sid.replace('.', '_')}-{idx}"
-    return f"{base}-{sub}.png" if sub >= 0 else f"{base}.png"
+    # 交互图谱（Plotly figure JSON）；前端按 .plotly.json 扩展名识别并交互式渲染。
+    return f"{base}-{sub}.plotly.json" if sub >= 0 else f"{base}.plotly.json"
 
 
 @dataclass
@@ -243,10 +244,10 @@ class ByRegionTableRenderer:
 
 
 def _chart_lint(store: MetricStore, spec: dict, kind: str) -> str | None:
-    from agentic_studio.infra.writing.artifacts import has_matplotlib
+    from agentic_studio.infra.writing.artifacts import has_plotly
 
-    if not has_matplotlib():
-        return f"声明了图（{kind}）但未安装 matplotlib（安装 viz extra：uv …  --extra viz）"
+    if not has_plotly():
+        return f"声明了图（{kind}）但未安装 plotly（安装 viz extra：uv …  --extra viz）"
     return _lint_codes(store, spec, kind)
 
 

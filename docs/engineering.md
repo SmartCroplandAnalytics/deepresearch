@@ -387,8 +387,10 @@ supersede、错 plugin 拒绝。共 34 例全过。
 ## 14. 确定性图表（figures/tables，2026-06-13）
 
 简报图表走与数字护栏同一哲学：**图表不经 LLM**——由数据源 renderer 从 MetricStore 查询结果
-直接渲染（表=markdown 直出；图=matplotlib+seaborn 落 PNG 到 workspace `figures/`），数字
-**构造即有据**；模型只被告知"本节将附哪些图表"，行文用「下图/下表」衔接，不画图、不填表。
+直接渲染（表=markdown 直出；图=**Plotly figure JSON** 落到 workspace `figures/*.plotly.json`，
+前端 plotly.js 交互式渲染、PNG 客户端导出，服务端不依赖任何渲染后端），数字**构造即有据**；
+模型只被告知"本节将附哪些图表"，行文用「下图/下表」衔接，不画图、不填表。
+（2026-06-13 由 matplotlib 改为 Plotly：对话与简报统一交互式图表，导出用 PNG。）
 
 - **声明在 plugin**：outline.yaml 每节 `figures:` / `tables:`，kind 由 datasource 的 renderer
   提供（metric_postgres：`line_chart` / `bar_chart` / `series_table` / `by_region_table`），
@@ -397,11 +399,13 @@ supersede、错 plugin 拒绝。共 34 例全过。
 - **能力层**（`infra/writing/artifacts.py` + grounded_brief `_render_artifacts`）：领域无关的
   md_table/绘图原语 + 编号占位 `[[图]]`/`[[表]]`（CJK token，避开 `[id]` 引用正则，不会被装配
   重编号误吃），`number_artifacts` 在装配时按全文顺序替换为 图1/表1…；state 保留占位 →
-  revise 重装配后编号仍全局一致。绘图用 Figure OO API（无 pyplot 全局态，节级并行安全）；
-  seaborn 只做主题/配色（whitegrid + deep/crest_r 渐变 + 末点/条端标值），中文字体雅黑级联。
-- **lint**：渲染 kind 未注册、code 不在白名单、声明了图但缺 matplotlib（viz extra）→ 载入期
+  revise 重装配后编号仍全局一致。renderer 构造纯 dict 的 Plotly figure（data+layout，无全局态，
+  节级并行安全），落 `*.plotly.json`；markdown 仍用 `![标题](figures/x.plotly.json)` 引用，
+  前端按扩展名识别为交互图；中文字体走浏览器（plotly.js 端渲染，无需服务端字体）。
+- **lint**：渲染 kind 未注册、code 不在白名单、声明了图但缺 plotly（viz extra）→ 载入期
   fail-fast；运行期单个图表失败只入 format 队列项、不毁节。
-- **依赖**：extra `viz = [matplotlib, seaborn]`。
+- **依赖**：extra `viz = [plotly]`。对话侧 chat 能力的 `render_chart` 沙箱同样产 Plotly figure JSON
+  （隔离子进程跑用户 plotly 代码，环境白名单剥离密钥/DSN）——对话与简报图表完全同栈。
 - **实测**（四川省第 1 章，真库）：图1-3/表1-3 全局编号正确穿插，中文无豆腐块；by_region 分区
   表含确定性"变化量"列。护栏顺带抓到模型自算市州净增减（7.31/10.96/2.14/0.69，证据只有两年
   原值）→ L5 入队呈人——**已知噪声源**：分区类证据暂无确定性派生量（series 有 `_summarize`，

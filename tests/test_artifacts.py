@@ -1,6 +1,6 @@
-"""确定性图表件：md_table / 编号占位替换 / 折线图落盘（matplotlib 可选）。"""
+"""确定性图表件：md_table / 编号占位替换 / 折线图落盘（Plotly figure JSON，可选）。"""
 
-import pytest
+import json
 
 from agentic_studio.infra.writing.artifacts import (
     FIG_TOKEN,
@@ -34,21 +34,27 @@ def test_tokens_invisible_to_cite_regex():
     assert _CITE.findall(f"{FIG_TOKEN}{TAB_TOKEN}") == []
 
 
-def test_save_line_chart_writes_png(tmp_path):
-    pytest.importorskip("matplotlib")
+def test_save_line_chart_writes_plotly_json(tmp_path):
     from agentic_studio.infra.writing.artifacts import save_line_chart
 
-    p = tmp_path / "figs" / "t.png"
+    p = tmp_path / "figs" / "t.plotly.json"
     save_line_chart(p, [("成都市", [(2020, 486.47), (2023, 499.60)])],
                     ylabel="万亩", title="耕地面积历年变化")
-    assert p.is_file() and p.stat().st_size > 1000
+    assert p.is_file()
+    fig = json.loads(p.read_text(encoding="utf-8"))
+    assert fig["data"] and fig["data"][0]["type"] == "scatter"
+    assert fig["data"][0]["y"] == [486.47, 499.60]
+    assert "耕地面积历年变化" in fig["layout"]["title"]["text"]
 
 
-def test_save_bar_chart_writes_png(tmp_path):
-    pytest.importorskip("matplotlib")
+def test_save_bar_chart_writes_plotly_json(tmp_path):
     from agentic_studio.infra.writing.artifacts import save_bar_chart
 
-    p = tmp_path / "figs" / "b.png"
+    p = tmp_path / "figs" / "b.plotly.json"
     save_bar_chart(p, ["成都市", "绵阳市"], [499.60, 401.10], xlabel="耕地面积（万亩）",
                    title="各市对比")
-    assert p.is_file() and p.stat().st_size > 1000
+    assert p.is_file()
+    fig = json.loads(p.read_text(encoding="utf-8"))
+    assert fig["data"][0]["type"] == "bar" and fig["data"][0]["orientation"] == "h"
+    # 反转后最大值（成都市）应在末位（plotly 横向条形列表自下而上 → 顶部）
+    assert fig["data"][0]["y"][-1] == "成都市"
