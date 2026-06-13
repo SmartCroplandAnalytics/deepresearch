@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -283,9 +284,109 @@ def _generate_reply(head: str, manuscript_path: str | None, full_body: bool, wor
     )
 
 
+# ───────────────────────── metric-query 能力工具集（正常对话查库真值）─────────────────────────
+
+
+def make_metric_query_tools(
+    skills_root: str,
+    workspace: str,
+    model_spec: str,
+    closers: list[Callable[[], None]],
+    *,
+    full_body: bool = True,
+) -> list:
+    """db_* 工具：正常对话里**像简报一样**从指标库取真值。
+
+    复用 plugin datasource.yaml 声明的同一条安全取数路径（MetricStore：只读 +
+    指标/地区白名单 + 参数化，agent 不写 SQL、不见 DSN）——所以对话里查到的值与简报
+    证据**逐字一致**。以 plugin 名为参数（会话不绑死单 plugin）；provider 懒建、登记会话级关闭。
+    """
+    root = Path(skills_root)
+    pset_cache: dict[str, Any] = {}
+
+    def _store(plugin: str) -> Any:
+        if plugin not in pset_cache:
+            d = root / plugin
+            if not (d / "datasource.yaml").is_file():
+                avail = [p.parent.name for p in root.glob("*/datasource.yaml")]
+                raise ValueError(
+                    f"领域 plugin「{plugin}」无数据源声明。可查库的 plugin："
+                    f"{', '.join(avail) or '（无）'}"
+                )
+            ps = gb.build_provider_set(str(d))
+            closers.append(ps.close)
+            pset_cache[plugin] = ps
+        sp = pset_cache[plugin].providers.get("series")
+        store = getattr(sp, "store", None)
+        if store is None:
+            raise ValueError(f"plugin「{plugin}」的数据源不支持指标查询")
+        return store
+
+    def _years(years: str) -> tuple[int, int] | None:
+        nums = re.findall(r"\d{4}", years or "")
+        if len(nums) >= 2:
+            return (int(nums[0]), int(nums[1]))
+        if len(nums) == 1:
+            return (int(nums[0]), int(nums[0]))
+        return None
+
+    @tool
+    def db_indicators(plugin: str) -> str:
+        """列出该领域指标库里**可查询的全部指标**（code — 名称（单位）[原始/派生]）。
+        想查某个具体数值前，先用它确认指标 code（如 SLOPE_0_2_AREA）。"""
+        try:
+            store = _store(plugin)
+        except (ValueError, RuntimeError) as e:
+            return f"无法查询：{e}"
+        kind_zh = {"raw": "原始", "derived": "派生"}
+        rows = [
+            f"- {c} — {n}（{u}）[{kind_zh.get(k, k)}]"
+            for c, (n, u, k) in sorted(store.indicators().items())
+        ]
+        return f"plugin「{plugin}」可查指标（{len(rows)} 个）：\n" + "\n".join(rows)
+
+    @tool
+    def db_series(plugin: str, code: str, region: str = "", years: str = "") -> str:
+        """查某指标在某地区的**历年真值**（直接来自数据库；含确定性派生量：累计变化/变化率/年均）。
+        region 缺省=该领域默认地区；years 形如 "2020-2023" 限定区间。
+        这是"数据库里这个值是多少"的权威答案——请逐字引用、严禁改写或四舍五入。"""
+        try:
+            store = _store(plugin)
+            e = store.as_evidence(code, region or None, years=_years(years))
+        except (ValueError, RuntimeError) as exc:
+            return f"无法查询：{exc}"
+        if e is None:
+            return f"指标 {code} 在{region or '默认地区'}无数据（该年份/地区未覆盖）。"
+        return e["text"]
+
+    @tool
+    def db_compare(plugin: str, code: str, year: int, parent: str = "") -> str:
+        """某指标**某年**在 parent（缺省=默认地区）下各子地区的值（降序）——分区对比。"""
+        try:
+            store = _store(plugin)
+            e = store.region_evidence(code, int(year), parent=parent or None)
+        except (ValueError, RuntimeError) as exc:
+            return f"无法查询：{exc}"
+        if e is None:
+            return f"{year}年{parent or '默认地区'}下无 {code} 的分区数据。"
+        return e["text"]
+
+    @tool
+    def db_coverage(plugin: str) -> str:
+        """查该领域指标库**实际覆盖**的地区层级与年份（诚实判断"有没有这个粒度/年份"）。"""
+        try:
+            store = _store(plugin)
+        except (ValueError, RuntimeError) as e:
+            return f"无法查询：{e}"
+        return store.availability_text()
+
+    return [db_indicators, db_series, db_compare, db_coverage]
+
+
 # 能力注册表：能力名 → 工具工厂（skills_root, workspace, model_spec, closers, *, full_body）
 CAPABILITY_TOOLSETS: dict[str, Callable[..., list]] = {
     "grounded-writing": make_grounded_write_tools,
+    "metric-query": make_metric_query_tools,
 }
 
 
