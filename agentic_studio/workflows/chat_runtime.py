@@ -17,8 +17,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
 import threading
+import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -383,10 +387,116 @@ def make_metric_query_tools(
     return [db_indicators, db_series, db_compare, db_coverage]
 
 
+# ───────────────────────── chart 能力工具集（沙箱跑 matplotlib 出图）─────────────────────────
+
+_CHART_FONTS = ["Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC", "DejaVu Sans"]
+
+# 绘图代码静态护栏：禁文件/网络/系统/env 访问（env 已在子进程白名单里剥离，这是第二道防线）。
+_CHART_DENY = re.compile(
+    r"environ|getenv|subprocess|popen|os\.system|\bsocket\b|requests|urllib|httpx|"
+    r"__import__|\beval\(|\bexec\(|\bopen\(|pickle|marshal|shutil|\.env\b|CROPLAND_DSN|"
+    r"input\(|compile\(",
+    re.IGNORECASE,
+)
+
+# 子进程环境白名单（仅放使 python+matplotlib 能跑/找系统字体的键；**不含任何密钥/DSN**）。
+_CHART_SAFE_ENV = [
+    "SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP", "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "COMSPEC", "PATHEXT",
+    "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH", "HOME", "LANG", "LC_ALL", "LD_LIBRARY_PATH",
+]
+
+
+def make_chart_tools(
+    skills_root: str,
+    workspace: str,
+    model_spec: str,
+    closers: list[Callable[[], None]],
+    *,
+    full_body: bool = True,
+) -> list:
+    """render_chart：把 matplotlib 绘图代码放进**隔离子进程**跑，出 PNG 落工作区 figures/。
+
+    安全设计（不重开通用 execute，那会泄露 DSN/密钥）：
+    - **环境白名单**：子进程 env 只保留让 python+matplotlib 运行/找字体的键，**剥离全部密钥与
+      CROPLAND_DSN**——代码即便想读 env 也拿不到敏感值。
+    - **静态护栏**：拒绝含文件/网络/系统/env 访问的代码（只允许用 matplotlib 画内联数据）。
+    - **沙箱边界**：用本环境 venv 的 python（sys.executable），cwd 锁在 figures/，Agg 无界面，
+      30s 超时；runner 脚本用后即删。
+    """
+    ws = Path(workspace)
+
+    @tool
+    def render_chart(code: str) -> str:
+        """用 matplotlib 画图并出 PNG（折线/柱状/散点等皆可）。
+
+        code = 一段 **pyplot** 绘图代码，数据**内联写在代码里**（如 years=[...]、values=[...]），
+        正常 plt.plot/plt.bar/plt.title… 即可；**不要**读文件、联网或访问系统/环境变量。
+        无需自己存盘——本工具会自动把当前图保存到工作区。出图后请在回复里用
+        ![标题](figures/xxx.png) 展示（路径见返回值）。中文标签照常写，字体已配好。
+        """
+        hit = _CHART_DENY.search(code or "")
+        if hit:
+            return (
+                f"为安全起见，绘图代码不能包含文件/网络/系统/环境访问（命中「{hit.group(0)}」）。"
+                "请只用 matplotlib 画**内联数据**（把数值直接写进 years=[...]、values=[...]）。"
+            )
+        figdir = ws / "figures"
+        figdir.mkdir(parents=True, exist_ok=True)
+        name = f"chat-{uuid.uuid4().hex[:8]}.png"
+        out_abs = figdir / name
+        script = (
+            "import matplotlib\n"
+            "matplotlib.use('Agg')\n"
+            "import matplotlib.pyplot as plt\n"
+            "try:\n"
+            "    import seaborn as sns; sns.set_theme(style='whitegrid', context='notebook')\n"
+            "except Exception:\n"
+            "    pass\n"
+            "matplotlib.rcParams['font.family']='sans-serif'\n"
+            f"matplotlib.rcParams['font.sans-serif']={_CHART_FONTS!r}\n"
+            "matplotlib.rcParams['axes.unicode_minus']=False\n"
+            f"output_path={str(out_abs)!r}\n"
+            "# ── 用户绘图代码 ──\n"
+            + (code or "")
+            + "\n# ── 自动保存当前图 ──\n"
+            "plt.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')\n"
+        )
+        runner = ws / f".chart_runner_{uuid.uuid4().hex[:6]}.py"
+        runner.write_text(script, encoding="utf-8")
+        env = {k: os.environ[k] for k in _CHART_SAFE_ENV if k in os.environ}
+        env.update({
+            "MPLBACKEND": "Agg", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
+            "MPLCONFIGDIR": str(ws / ".mplcache"),
+        })
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(runner)],
+                cwd=str(figdir), env=env, capture_output=True, text=True, timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            return "绘图超时（>30s）——代码可能有死循环或过重，请简化后重试。"
+        finally:
+            try:
+                runner.unlink()
+            except OSError:
+                pass
+        if out_abs.exists() and out_abs.stat().st_size > 0:
+            return (
+                f"已出图，路径 figures/{name}。请在回复里用 ![图表标题](figures/{name}) "
+                "展示给用户（右侧暂存区也可见、可下载）。"
+            )
+        err = (proc.stderr or proc.stdout or "").strip()[-800:]
+        return f"绘图失败（请修正代码后重试）：\n{err or '未知错误：未生成图片文件'}"
+
+    return [render_chart]
+
+
 # 能力注册表：能力名 → 工具工厂（skills_root, workspace, model_spec, closers, *, full_body）
 CAPABILITY_TOOLSETS: dict[str, Callable[..., list]] = {
     "grounded-writing": make_grounded_write_tools,
     "metric-query": make_metric_query_tools,
+    "chart": make_chart_tools,
 }
 
 
