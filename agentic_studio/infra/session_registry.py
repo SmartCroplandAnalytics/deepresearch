@@ -15,7 +15,7 @@ _META = ".session.json"
 
 
 def write_session_meta(
-    workspace_root: str, session_id: str, *, title: str = "", plugin: str = ""
+    workspace_root: str, session_id: str, *, title: str = "", plugin: str = "", scenario: str = ""
 ) -> None:
     """在 workspace 根写会话元信息（已存在则保留原 created；空 title 不冲掉已有标题）。"""
     p = Path(workspace_root)
@@ -28,6 +28,7 @@ def write_session_meta(
             created = old.get("created", "")
             # 重建会话（续跑）时调用方通常不带 title——保留用户已有标题
             title = title or old.get("title", "")
+            scenario = scenario or old.get("scenario", "")
         except Exception:  # noqa: BLE001
             pass
     f.write_text(json.dumps({
@@ -35,6 +36,7 @@ def write_session_meta(
         "workspace": str(p),
         "title": title,
         "plugin": plugin,
+        "scenario": scenario,
         "created": created or datetime.now().isoformat(timespec="seconds"),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 

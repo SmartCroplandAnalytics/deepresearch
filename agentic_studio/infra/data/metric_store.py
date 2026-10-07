@@ -52,6 +52,7 @@ class MetricSourceConfig:
     default_region: str = ""
     source_name: str = "metric_db"
     dsn_env: str = ""
+    allowed_codes: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, d: dict) -> MetricSourceConfig:
@@ -67,6 +68,7 @@ class MetricSourceConfig:
             default_region=d.get("default_region", ""),
             source_name=d.get("source_name", cls.source_name),
             dsn_env=d.get("dsn_env", ""),
+            allowed_codes=tuple(d.get("allowed_codes") or ()),
         )
 
     def __post_init__(self) -> None:
@@ -167,6 +169,9 @@ class MetricStore:
             self._meta[code] = (name, unit, "raw")
         for code, name, unit in self._q(f"select code,name,unit from {self.cfg.derived_meta}"):
             self._meta[code] = (name, unit, "derived")
+        if self.cfg.allowed_codes:
+            allowed = set(self.cfg.allowed_codes)
+            self._meta = {code: value for code, value in self._meta.items() if code in allowed}
         self._regions = {r[0] for r in self._q(f"select name from {self.cfg.region_table}")}
 
     def _check(self, code: str, region: str) -> str:
@@ -192,7 +197,12 @@ class MetricStore:
         return set(self._regions)
 
     def years(self) -> list[int]:
-        rows = self._q(f"select distinct year from {self.cfg.time_table} order by year")
+        codes = list(self._meta)
+        rows = self._q(
+            f"select year from {self.cfg.raw_view} where indicator_code = ANY(%s) and value is not null "
+            f"union select year from {self.cfg.derived_view} where indicator_code = ANY(%s) and value is not null "
+            "order by year", (codes, codes),
+        )
         return [int(r[0]) for r in rows if r[0] is not None]
 
     def series(
@@ -218,9 +228,10 @@ class MetricStore:
         """实际**有指标数据**的地区，按层级分组（诚实回答"有没有这个粒度"）。"""
         rows = self._q(
             "select r.level, v.region_name from "
-            f"(select distinct region_name from {self.cfg.raw_view}) v "
+            f"(select region_name from {self.cfg.raw_view} where indicator_code = ANY(%s) and value is not null "
+            f"union select region_name from {self.cfg.derived_view} where indicator_code = ANY(%s) and value is not null) v "
             f"join {self.cfg.region_table} r on r.name = v.region_name "
-            "order by r.level, v.region_name"
+            "order by r.level, v.region_name", (list(self._meta), list(self._meta)),
         )
         out: dict[str, list[str]] = {}
         for level, name in rows:
@@ -248,7 +259,9 @@ class MetricStore:
     def has_data(self, region: str) -> bool:
         """该地区是否有指标数据（无 → 诚实返回 False）。"""
         return bool(self._q(
-            f"select 1 from {self.cfg.raw_view} where region_name = %s limit 1", (region,)
+            f"select 1 from {self.cfg.raw_view} where region_name = %s and indicator_code = ANY(%s) and value is not null "
+            f"union select 1 from {self.cfg.derived_view} where region_name = %s and indicator_code = ANY(%s) and value is not null "
+            "limit 1", (region, list(self._meta), region, list(self._meta)),
         ))
 
     def by_region(

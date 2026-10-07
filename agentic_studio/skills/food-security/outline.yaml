@@ -1,0 +1,257 @@
+title: 粮食安全效应简报
+language: 中文
+scope:
+  label: $regions（$years年）
+  params:
+    regions:
+      type: list_str
+      default:
+      - 四川省
+      check: region
+      desc: 省或市州，可多地区比较
+    years:
+      type: year_range
+      default:
+      - 2019
+      - 2024
+      desc: 年份区间；源表仅含2019和2024
+    breakdown:
+      type: bool
+      default: true
+      desc: 是否比较各市州
+sections:
+- id: '1'
+  title: 耕地分布情况
+  children:
+  - id: '1.1'
+    title: 耕地规模与结构
+    key_question: 2019与2024年耕地规模与结构有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_FARMLAND_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_PADDY_FIELD_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_IRRIGATED_LAND_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_DRY_LAND_AREA
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_FARMLAND_AREA
+      region: $regions
+      years: $years
+      caption: 耕地规模与结构两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_FARMLAND_AREA
+      - FS_PADDY_FIELD_AREA
+      - FS_IRRIGATED_LAND_AREA
+      - FS_DRY_LAND_AREA
+      region: $regions
+      years: $years
+      caption: 耕地规模与结构指标数据
+  - id: '1.2'
+    title: 坡度、稳定性与破碎度
+    key_question: 2019与2024年坡度、稳定性与破碎度有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_SLOPE_0_2_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_SLOPE_2_6_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_SLOPE_6_15_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_SLOPE_15_25_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_SLOPE_25_PLUS_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_STABLE_FARMLAND_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_FARMLAND_FRAGMENTATION
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_SLOPE_0_2_AREA
+      region: $regions
+      years: $years
+      caption: 坡度、稳定性与破碎度两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_SLOPE_0_2_AREA
+      - FS_SLOPE_2_6_AREA
+      - FS_SLOPE_6_15_AREA
+      - FS_SLOPE_15_25_AREA
+      - FS_SLOPE_25_PLUS_AREA
+      - FS_STABLE_FARMLAND_AREA
+      - FS_FARMLAND_FRAGMENTATION
+      region: $regions
+      years: $years
+      caption: 坡度、稳定性与破碎度指标数据
+- id: '2'
+  title: 耕地投入情况
+  children:
+  - id: '2.1'
+    title: 粮食播种面积与结构
+    key_question: 2019与2024年粮食播种面积与结构有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_GRAIN_SOWN_AREA
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_GRAIN_SOWN_SHARE
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_GRAIN_SOWN_AREA
+      region: $regions
+      years: $years
+      caption: 粮食播种面积与结构两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_GRAIN_SOWN_AREA
+      - FS_GRAIN_SOWN_SHARE
+      region: $regions
+      years: $years
+      caption: 粮食播种面积与结构指标数据
+  - id: '2.2'
+    title: 复种与农业人口投入
+    key_question: 2019与2024年复种与农业人口投入有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_CROPPING_INDEX
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_AGRICULTURAL_POPULATION_DENSITY
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_CROPPING_INDEX
+      region: $regions
+      years: $years
+      caption: 复种与农业人口投入两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_CROPPING_INDEX
+      - FS_AGRICULTURAL_POPULATION_DENSITY
+      region: $regions
+      years: $years
+      caption: 复种与农业人口投入指标数据
+- id: '3'
+  title: 耕地产出情况
+  children:
+  - id: '3.1'
+    title: 粮食产量与单产
+    key_question: 2019与2024年粮食产量与单产有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_GRAIN_PRODUCTION
+      region: $regions
+      years: $years
+    - kind: series
+      code: FS_GRAIN_YIELD
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_GRAIN_PRODUCTION
+      region: $regions
+      years: $years
+      caption: 粮食产量与单产两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_GRAIN_PRODUCTION
+      - FS_GRAIN_YIELD
+      region: $regions
+      years: $years
+      caption: 粮食产量与单产指标数据
+  - id: '3.2'
+    title: 人均粮食产量
+    key_question: 2019与2024年人均粮食产量有何变化？证据支持哪些判断，哪些成因尚不能判断？
+    target_words: 220
+    evidence:
+    - kind: series
+      code: FS_GRAIN_PER_CAPITA
+      region: $regions
+      years: $years
+    figures:
+    - kind: line_chart
+      code: FS_GRAIN_PER_CAPITA
+      region: $regions
+      years: $years
+      caption: 人均粮食产量两期比较
+    tables:
+    - kind: series_table
+      codes:
+      - FS_GRAIN_PER_CAPITA
+      region: $regions
+      years: $years
+      caption: 人均粮食产量指标数据
+  - id: '3.3'
+    title: 各市州粮食产出比较
+    key_question: 各市州粮食产量和人均粮食产量有何差异？
+    target_words: 220
+    optional: true
+    evidence:
+    - kind: by_region
+      code: FS_GRAIN_PRODUCTION
+      year: 2024
+      parent: $regions
+      years: $years
+      when: $breakdown
+    - kind: by_region
+      code: FS_GRAIN_PER_CAPITA
+      year: 2024
+      parent: $regions
+      years: $years
+      when: $breakdown
+    figures:
+    - kind: bar_chart
+      code: FS_GRAIN_PRODUCTION
+      parent: $regions
+      years: $years
+      top: 21
+      when: $breakdown
+      caption: 各市州粮食产量
+    tables:
+    - kind: by_region_table
+      code: FS_GRAIN_PRODUCTION
+      parent: $regions
+      years: $years
+      top: 21
+      when: $breakdown
+      caption: 各市州粮食产量两期比较

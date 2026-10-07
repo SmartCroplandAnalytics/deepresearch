@@ -44,3 +44,18 @@ def test_config_from_dict_defaults():
     assert cfg.raw_view == "v_raw"
     assert cfg.derived_view == "vw_region_time_indicator_derived"  # 未给 → 默认
     assert cfg.default_region == "甲省" and cfg.dsn_env == "FOO_DSN"
+
+
+def test_plugin_whitelist_excludes_other_scenario_indicators():
+    from agentic_studio.infra.data.metric_store import MetricStore
+    store = object.__new__(MetricStore)
+    store.cfg = MetricSourceConfig(allowed_codes=("FS_GRAIN_PRODUCTION",))
+    store._meta = {}
+    store._q = lambda sql: [("四川省",)] if "select name" in sql else [
+        ("FS_GRAIN_PRODUCTION", "粮食产量", "万吨"),
+        ("FARMLAND_AREA", "耕地面积", "万亩"),
+    ]
+    store._load_allowlist()
+    assert set(store.indicators()) == {"FS_GRAIN_PRODUCTION"}
+    with pytest.raises(ValueError, match="未知指标"):
+        store._check("FARMLAND_AREA", "四川省")
