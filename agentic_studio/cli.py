@@ -121,7 +121,7 @@ def _stream_session(sess, message: str) -> None:
 def chat(
     message: str = typer.Argument(..., help="发给 agent 的一句话"),
     workspace: str = typer.Option("", "--workspace", "-w", help="工作区目录（默认临时目录）"),
-    model: str = typer.Option("deepseek:deepseek-chat", "--model", "-m"),
+    model: str = typer.Option("deepseek:deepseek-flash", "--model", "-m"),
     db: list[str] = typer.Option(
         None, "--db", help="可重复：'alias=DSN' 或纯 DSN（别名取库名）。每个挂为只读 /db/<alias>"
     ),
@@ -156,7 +156,7 @@ def chat(
 def research(
     topic: str = typer.Argument(..., help="研究主题 / 问题"),
     workspace: str = typer.Option("", "--workspace", "-w", help="工作区目录（默认临时目录）"),
-    model: str = typer.Option("deepseek:deepseek-chat", "--model", "-m"),
+    model: str = typer.Option("deepseek:deepseek-flash", "--model", "-m"),
     requirements: str = typer.Option("", "--requirements", help="内容要求（指令注入：要覆盖什么）"),
     structure: str = typer.Option("", "--structure", help="结构 / outline 约束"),
     style: str = typer.Option("", "--style", help="风格要求（语气 / 术语 / 参考文档）"),
@@ -219,7 +219,7 @@ def write(
         "studio", "--session", "-s", help="会话 id（同 id+workspace = 续跑）"
     ),
     workspace: str = typer.Option("", "--workspace", "-w", help="工作区（默认按会话 id 定位）"),
-    model: str = typer.Option("deepseek:deepseek-chat", "--model", "-m"),
+    model: str = typer.Option("deepseek:deepseek-flash", "--model", "-m"),
     skills_dir: str = typer.Option(
         _SKILLS_DEFAULT, "--skills", help="skills 根目录（能力+plugin 同处）"
     ),
@@ -249,7 +249,7 @@ def brief(
         help='scope JSON（键见 plugin 的 scope schema），如 \'{"regions":["成都市"]}\'',
     ),
     workspace: str = typer.Option("", "--workspace", "-w"),
-    model: str = typer.Option("deepseek:deepseek-chat", "--model", "-m"),
+    model: str = typer.Option("deepseek:deepseek-flash", "--model", "-m"),
     skills_dir: str = typer.Option(_SKILLS_DEFAULT, "--skills"),
 ) -> None:
     """一次性跑 grounded-write 驱动器（不经对话；产物落 workspace）。"""

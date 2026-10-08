@@ -12,7 +12,7 @@ from typing import Any
 from agentic_studio.core import TaskSpec
 from agentic_studio.infra.session import SessionEngine
 
-DEFAULT_MODEL = "deepseek:deepseek-chat"
+DEFAULT_MODEL = "deepseek:deepseek-flash"
 
 
 def build_session(

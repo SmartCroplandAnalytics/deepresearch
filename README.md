@@ -1,8 +1,9 @@
-# deepresearch — 耕地时空演变对话研究引擎（agentic-studio engineering）
+# deepresearch — 耕地时空演变与粮食安全效应对话研究引擎
 
-SmartCroplandAnalytics 的研究 Agent 子项目。本分支（`engineering`）采用
+SmartCroplandAnalytics 的研究 Agent 子项目。本分支（`octpre`）沿用 junePre 的
 [agentic-studio] 的三层架构：**runtime（对话会话）/ 能力（grounded-writing）/ plugin（领域）**，
-首个领域 plugin 为 **耕地时空演变简报**（`agentic_studio/skills/cropland-spatiotemporal/`），
+领域 plugin 包括 **耕地时空演变**（`cropland-spatiotemporal`）与
+**粮食安全效应**（`food-security`），二者共用写作、问数及图表能力，
 数据取自本项目 backend 的 PostgreSQL 指标库（只读安全中介，agent 不写 SQL）。
 
 旧的 open_deep_research 实现保留在 `main` 分支。
@@ -24,6 +25,20 @@ uv run agentic-studio brief cropland-spatiotemporal --scope '{"regions":["成都
 uv run agentic-studio sessions
 uv run pytest -q
 ```
+
+## DeepSeek 模型配置（2026-10-08 核对）
+
+当前默认模型为 `deepseek:deepseek-flash`（V4.1 Flash），也可使用
+`deepseek:deepseek-v4-pro`；OpenAI 兼容地址仍为 `https://api.deepseek.com`。
+官方文档及本次鉴权 `/models` 返回均确认上述两个模型名。
+配置密钥使用本地 `.env` 或平台研究页设置，不提交密钥。
+
+本实现显式关闭思考模式，沿用原 LangChain 会话、工具调用和报告生成链。
+官方思考模式要求在工具对话中回传 `reasoning_content`；当前消息持久化不保留该字段，
+因此不能仅换模型名就默认开启思考模式。
+
+参考：[首次调用 API](https://api-docs.deepseek.com/zh-cn/)、
+[思考模式与工具调用](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)。
 
 ## 核心特性
 
