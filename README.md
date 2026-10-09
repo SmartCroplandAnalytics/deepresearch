@@ -6,6 +6,9 @@ SmartCroplandAnalytics 的研究 Agent 子项目。本分支（`octpre`）沿用
 **粮食安全效应**（`food-security`），二者共用写作、问数及图表能力，
 数据取自本项目 backend 的 PostgreSQL 指标库（只读安全中介，agent 不写 SQL）。
 
+报告标题统一为“智能分析报告”。耕地报告按耕地数量变化、耕地结构变化、耕地流量变化、
+耕地质量变化、耕地破碎度变化五类组织原13节分析；粮食报告按分布、投入、产出三类组织7节分析。
+
 旧的 open_deep_research 实现保留在 `main` 分支。
 
 ## 快速开始
@@ -16,9 +19,9 @@ uv sync --extra agent --extra vfs --extra pg --extra viz --extra dev
 # .env：至少 DEEPSEEK_API_KEY + CROPLAND_DSN（见 CLAUDE.md「环境」）
 
 # 对话（会话可续跑：同 -s 即接着上次）
-uv run agentic-studio write "写一份成都市2020到2023年的耕地数量与结构变化简报" -s demo
+uv run agentic-studio write "写一份成都市2020到2023年的耕地数量与结构变化智能分析报告" -s demo
 
-# 一次性出简报（不经对话）
+# 一次性生成智能分析报告（不经对话）
 uv run agentic-studio brief cropland-spatiotemporal --scope '{"regions":["成都市"],"years":[2020,2023]}'
 
 # 列举持久会话 / 跑测试

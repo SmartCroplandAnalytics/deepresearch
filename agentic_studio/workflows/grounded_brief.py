@@ -356,7 +356,7 @@ def _assemble_and_write(
         f"（{registry.get(nid, {}).get('source', nid)}）",
         ref_heading="## 数据来源",
     )
-    title = plugin["outline"].get("title", "简报")
+    title = plugin["outline"].get("title", "智能分析报告")
     manuscript = f"# {title}\n\n_（范围：{label}）_\n\n{body}\n\n{refs}\n"
     # [[图]]/[[表]] 占位 → 图1/表1…（state 里保留占位，重装配/修订时编号始终全局一致）
     manuscript = number_artifacts(manuscript)

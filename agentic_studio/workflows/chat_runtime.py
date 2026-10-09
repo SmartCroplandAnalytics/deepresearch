@@ -199,11 +199,11 @@ def make_grounded_write_tools(
             )
             if same:
                 return _generate_reply(
-                    "该 scope 的简报**已生成过**（不重复生成）。", None, full_body, workspace
+                    "该 scope 的智能分析报告**已生成过**（不重复生成）。", None, full_body, workspace
                 )
             overwrite = ""
             if state is not None:
-                overwrite = f"（注意：已覆盖此前简报，原范围：{state.get('label', '?')}）\n"
+                overwrite = f"（注意：已覆盖此前智能分析报告，原范围：{state.get('label', '?')}）\n"
             try:
                 res = gb.run_brief(
                     info["dir"], model_spec, workspace,
@@ -277,7 +277,7 @@ def _generate_reply(head: str, manuscript_path: str | None, full_body: bool, wor
         body = mp.read_text(encoding="utf-8")
         return (
             f"{head}\n正文已写入工作区 /manuscript.md。\n\n"
-            "【以下是简报正文。向用户汇报时只能引用此正文中的内容与数字，"
+            "【以下是智能分析报告正文。向用户汇报时只能引用此正文中的内容与数字，"
             "严禁改写、四舍五入或编造任何数字；如需概述也必须忠于下文】\n"
             f"{body}"
         )
@@ -299,10 +299,10 @@ def make_metric_query_tools(
     *,
     full_body: bool = True,
 ) -> list:
-    """db_* 工具：正常对话里**像简报一样**从指标库取真值。
+    """db_* 工具：正常对话里**像智能分析报告一样**从指标库取真值。
 
     复用 plugin datasource.yaml 声明的同一条安全取数路径（MetricStore：只读 +
-    指标/地区白名单 + 参数化，agent 不写 SQL、不见 DSN）——所以对话里查到的值与简报
+    指标/地区白名单 + 参数化，agent 不写 SQL、不见 DSN）——所以对话里查到的值与智能分析报告
     证据**逐字一致**。以 plugin 名为参数（会话不绑死单 plugin）；provider 懒建、登记会话级关闭。
     """
     root = Path(skills_root)
